@@ -45,7 +45,7 @@ services:
       - routing-packager
     restart: always
   worker:
-    image: ghcr.io/geoadmin/routing-graph-packager/routing-graph-packager:latest
+    image: ghcr.io/swisstopo/routing-graph-packager/routing-graph-packager:latest
     container_name: routing-packager-worker
     # only works off the package queue
     command: worker
@@ -65,7 +65,7 @@ services:
       disable: true
     restart: always
   app:
-    image: ghcr.io/geoadmin/routing-graph-packager/routing-graph-packager:latest
+    image: ghcr.io/swisstopo/routing-graph-packager/routing-graph-packager:latest
     container_name: routing-packager-app
     ports:
       - 443:5000

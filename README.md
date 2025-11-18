@@ -1,6 +1,6 @@
 # Routing Graph Packager HTTP API
 
-[![tests](https://github.com/geoadmin/routing-graph-packager/actions/workflows/test-ubuntu.yml/badge.svg)](https://github.com/geoadmin/routing-graph-packager/actions/workflows/test-ubuntu.yml)
+[![tests](https://github.com/swisstopo/routing-graph-packager/actions/workflows/test-ubuntu.yml/badge.svg)](https://github.com/swisstopo/routing-graph-packager/actions/workflows/test-ubuntu.yml)
 [![Coverage Status](https://coveralls.io/repos/github/gis-ops/routing-graph-packager/badge.svg)](https://coveralls.io/github/gis-ops/routing-graph-packager)
 
 A [FastAPI](https://github.com/tiangolo/fastpi) app to dynamically deliver ZIPped [Valhalla](https://github.com/valhalla/valhalla) graphs from a variety of data sources.

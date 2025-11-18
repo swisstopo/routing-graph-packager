@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 ### Added
-- API Key based authentication [#43](https://github.com/geoadmin/routing-graph-packager/pull/43)
+- API Key based authentication [#43](https://github.com/swisstopo/routing-graph-packager/pull/43)
 ### Fixed
 -
 ### Changed
