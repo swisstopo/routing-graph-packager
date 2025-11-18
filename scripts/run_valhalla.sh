@@ -59,6 +59,8 @@ PBF="/app/tmp_data/osm/planet-latest.osm.pbf"
 # activate the virtual env so the CLI can do its job in the supervisor env
 . /app/app_venv/bin/activate
 
+CONCURRENCY=14
+MAX_CACHE_SIZE=8000000000
 CURRENT_PORT=""
 CURRENT_VALHALLA_DIR=""
 OLD_PORT=""
@@ -117,6 +119,7 @@ while true; do
     --mjolnir-tile-dir "$CURRENT_VALHALLA_DIR" \
     --additional-data-elevation "$ELEVATION_DIR" \
     --mjolnir-concurrency "$CONCURRENCY" \
+    --mjolnir-max-cache-size "$MAX_CACHE_SIZE" \
     --mjolnir-logging-type "" \
     > "${valhalla_config}" || exit 1
 
