@@ -59,8 +59,8 @@ PBF="/app/tmp_data/osm/planet-latest.osm.pbf"
 # activate the virtual env so the CLI can do its job in the supervisor env
 . /app/app_venv/bin/activate
 
-CONCURRENCY=14
-MAX_CACHE_SIZE=8000000000
+CONCURRENCY="14"
+MAX_CACHE_SIZE="8000000000"
 CURRENT_PORT=""
 CURRENT_VALHALLA_DIR=""
 OLD_PORT=""
