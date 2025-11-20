@@ -1,5 +1,4 @@
 name: Deploy with Docker Compose
-
 on:
   push:
     branches:
@@ -7,7 +6,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: self-hosted  # uses your runner
+    runs-on: localhost_runner
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
