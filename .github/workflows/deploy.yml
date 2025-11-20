@@ -1,4 +1,4 @@
-name: Deploy with Docker Compose
+name: Deploy with Docker Compose on the self hosted runner
 on:
   push:
     branches:
