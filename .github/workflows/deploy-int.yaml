@@ -1,4 +1,4 @@
-name: Deploy -> localhost
+name: Deploy -> int
 on:
   push:
     branches:
@@ -23,4 +23,5 @@ jobs:
 
       - name: Deploy app
         run: |
-          docker-compose up -d --remove-orphans
+          docker-compose down --remove-orphans
+          docker-compose up -d
