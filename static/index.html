@@ -167,8 +167,11 @@
                 // ############################## config  ############################## 
 
                 // Authentication header, provide key with internal permission
-                const apikey = "YOUR_API_KEY_HERE";
-
+			    const params = new URLSearchParams(window.location.search);
+    			const apikey = params.get("api_key");
+				if (!apikey) {
+			      alert("Please provide an api key. index.html?api_key=***");
+			    }
                 // url path for jobs endpoint (provive full path when debugging localy)
                 var postjobsurl = hostlocation.concat("/api/v1/jobs/"); 
 
