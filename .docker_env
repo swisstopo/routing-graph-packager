@@ -25,4 +25,4 @@ SSL_KEY='ssl/server.key'
 
 # Valhalla image exclusive env vars
 # How many threads to build tiles? Should be two less than available threads
-CONCURRENCY=14
+CONCURRENCY=8
