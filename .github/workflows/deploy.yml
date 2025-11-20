@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main  # or your deployment branch
+  workflow_dispatch:
 
 jobs:
   deploy:
