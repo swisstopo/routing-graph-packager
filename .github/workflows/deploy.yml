@@ -15,12 +15,12 @@ jobs:
       - name: Set up Docker
         run: |
           docker --version
-          docker compose --version
+          docker-compose --version
 
       - name: Pull latest images
         run: |
-          docker compose pull
+          docker-compose pull
 
       - name: Deploy app
         run: |
-          docker compose up -d --remove-orphans
+          docker-compose up -d --remove-orphans
