@@ -33,12 +33,13 @@ jobs:
           SSL_CERT=${{ secrets.SSL_CERT }}
           SSL_KEY=${{ secrets.SSL_KEY }}
           CONCURRENCY=${{ vars.CONCURRENCY }}
+          EOF
+
+          cat > .env <<EOF
           DATA_DIR=${{ vars.DATA_DIR }}
           TMP_DATA_DIR=${{ vars.TMP_DATA_DIR }}
           COMPOSE_PROJECT_NAME=${{ vars.COMPOSE_PROJECT_NAME }}
           EOF
-
-          cp .docker_env .env
 
       - name: Pull latest images
         run: |
