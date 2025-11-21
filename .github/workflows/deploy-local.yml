@@ -39,6 +39,7 @@ jobs:
           DATA_DIR=${{ vars.DATA_DIR }}
           TMP_DATA_DIR=${{ vars.TMP_DATA_DIR }}
           COMPOSE_PROJECT_NAME=${{ vars.COMPOSE_PROJECT_NAME }}
+          SSL_CERT_DIR=${{ vars.SSL_CERT_DIR }}
           EOF
 
       - name: Pull latest images
