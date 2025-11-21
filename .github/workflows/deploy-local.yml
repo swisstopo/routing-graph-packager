@@ -1,0 +1,47 @@
+name: Deploy -> local
+on:
+  push:
+    branches:
+      - main  # or your deployment branch
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: localhost_runner
+    environment: localhost
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker
+        run: |
+          docker --version
+          docker-compose --version
+
+      - name: Generate .docker_env file
+        run: |
+          cat > .docker_env <<EOF
+          POSTGRES_HOST=${{ vars.POSTGRES_HOST }}
+          SMTP_HOST=${{ vars.SMTP_HOST }}
+          REDIS_URL=${{ vars.REDIS_URL }}
+          ADMIN_EMAIL=${{ vars.ADMIN_EMAIL }}
+          ADMIN_PASS=${{ secrets.ADMIN_PASS }}
+          VALHALLA_URL=${{ vars.VALHALLA_URL }}
+          POSTGRES_DB=${{ vars.POSTGRES_DB }}
+          POSTGRES_USER=${{ vars.POSTGRES_USER }}
+          POSTGRES_PASS=${{ secrets.POSTGRES_PASS }}
+          SSL_CERT=${{ secrets.SSL_CERT }}
+          SSL_KEY=${{ secrets.SSL_KEY }}
+          CONCURRENCY=${{ vars.CONCURRENCY }}
+          DATA_DIR=${{ vars.DATA_DIR }}
+          TMP_DATA_DIR=${{ vars.TMP_DATA_DIR }}
+          EOF
+
+      - name: Pull latest images
+        run: |
+          docker-compose pull
+
+      - name: Deploy app
+        run: |
+          docker-compose down --remove-orphans
+          docker-compose up -d
