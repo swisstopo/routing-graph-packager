@@ -1,27 +1,14 @@
 name: Deploy -> prod
 on:
-  #push:
-  #  branches:
-  #    - main  # or your deployment branch
+#  push:
+#    branches:
+#      - main  # TODO: set on master or your deployment branch
   workflow_dispatch:
 
 jobs:
   deploy:
-    runs-on: localhost_runner
+    runs-on: production_runner
     environment: production
-    env:
-      POSTGRES_HOST: ${{ vars.POSTGRES_HOST }}
-      SMTP_HOST: ${{ vars.SMTP_HOST }}
-      REDIS_URL: ${{ vars.REDIS_URL }}
-      ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}
-      ADMIN_PASS: ${{ secrets.ADMIN_PASS }}
-      VALHALLA_URL: ${{ vars.VALHALLA_URL }}
-      POSTGRES_DB: ${{ vars.POSTGRES_DB }}
-      POSTGRES_USER: ${{ vars.POSTGRES_USER }}
-      POSTGRES_PASS: ${{ secrets.POSTGRES_PASS }}
-      SSL_CERT: ${{ vars.SSL_CERT }}
-      SSL_KEY: ${{ vars.SSL_KEY }}
-      CONCURRENCY: ${{ vars.CONCURRENCY }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -30,6 +17,25 @@ jobs:
         run: |
           docker --version
           docker-compose --version
+
+      - name: Generate .docker_env file
+        run: |
+          cat > .docker_env <<EOF
+          POSTGRES_HOST=${{ vars.POSTGRES_HOST }}
+          SMTP_HOST=${{ vars.SMTP_HOST }}
+          REDIS_URL=${{ vars.REDIS_URL }}
+          ADMIN_EMAIL=${{ vars.ADMIN_EMAIL }}
+          ADMIN_PASS=${{ secrets.ADMIN_PASS }}
+          VALHALLA_URL=${{ vars.VALHALLA_URL }}
+          POSTGRES_DB=${{ vars.POSTGRES_DB }}
+          POSTGRES_USER=${{ vars.POSTGRES_USER }}
+          POSTGRES_PASS=${{ secrets.POSTGRES_PASS }}
+          SSL_CERT=${{ secrets.SSL_CERT }}
+          SSL_KEY=${{ secrets.SSL_KEY }}
+          CONCURRENCY=${{ vars.CONCURRENCY }}
+          DATA_DIR=${{ vars.DATA_DIR }}
+          TMP_DATA_DIR=${{ vars.TMP_DATA_DIR }}
+          EOF
 
       - name: Pull latest images
         run: |
