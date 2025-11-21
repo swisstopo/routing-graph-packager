@@ -1,3 +1,7 @@
+#
+# Application's env var, injected to containers
+# Github action env var & secrets ovwerride this file for deployement workflow.
+#
 # for docker-compose, database hosts are the service names in docker-compose.yml
 POSTGRES_HOST=postgis
 SMTP_HOST=fake-smtp-server
@@ -19,7 +23,7 @@ POSTGRES_PASS=admin
 
 # If you need a SSL certificate to be respected on the gunicorn level
 # Paths are local to the container (/app/ssl is mapped in docker-compose)
-# IT put certs in /data/certs. A Volume is configured to read there. 
+# Is put certs in /data/certs. A Volume is configured to read there. 
 SSL_CERT='ssl/server.crt'
 SSL_KEY='ssl/server.key'
 
