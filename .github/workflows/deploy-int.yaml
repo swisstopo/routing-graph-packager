@@ -8,6 +8,20 @@ on:
 jobs:
   deploy:
     runs-on: localhost_runner
+    environment: integration
+    env:
+      POSTGRES_HOST: ${{ vars.POSTGRES_HOST }}
+      SMTP_HOST: ${{ vars.SMTP_HOST }}
+      REDIS_URL: ${{ vars.REDIS_URL }}
+      ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}
+      ADMIN_PASS: ${{ secrets.ADMIN_PASS }}
+      VALHALLA_URL: ${{ vars.VALHALLA_URL }}
+      POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+      POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+      POSTGRES_PASS: ${{ secrets.POSTGRES_PASS }}
+      SSL_CERT: ${{ vars.SSL_CERT }}
+      SSL_KEY: ${{ vars.SSL_KEY }}
+      CONCURRENCY: ${{ vars.CONCURRENCY }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
