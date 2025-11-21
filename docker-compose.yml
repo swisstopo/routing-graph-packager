@@ -57,7 +57,7 @@ services:
     volumes:
       - packages:/app/data
       - tmp_data:/app/tmp_data
-      - $PWD/.docker_env:/app/.env # Worker needs access to .env file
+      #- $PWD/.docker_env:/app/.env # Worker needs access to .env file
     depends_on:
       - postgis
       - redis
@@ -75,7 +75,7 @@ services:
     volumes:
       - packages:/app/data
       - tmp_data:/app/tmp_data
-      - $PWD/.docker_env:/app/.env # CLI needs access to .env file
+      #- $PWD/.docker_env:/app/.env # CLI needs access to .env file
       - $PWD/static:/app/static # static file for frontend
       - /data/certs:/app/ssl
     networks:
