@@ -67,6 +67,8 @@ COPY --from=builder /app/conf/* /etc/supervisor/conf.d/
 RUN mv /app/ssl/gwdg_root_cert.crt /usr/local/share/ca-certificates && \
   update-ca-certificates
 
+RUN touch /app/.env
+
 EXPOSE 5000
 HEALTHCHECK --start-period=5s CMD curl --fail -s http://localhost:5000/api/v1/jobs || exit 1
 
