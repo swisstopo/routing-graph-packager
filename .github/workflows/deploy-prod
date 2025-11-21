@@ -1,14 +1,14 @@
-name: Deploy -> int
+name: Deploy -> prod
 on:
-  push:
-    branches:
-      - main  # TODO: set on master or your deployment branch
+#  push:
+#    branches:
+#      - main  # TODO: set on master or your deployment branch
   workflow_dispatch:
 
 jobs:
   deploy:
-    runs-on: integration_runner
-    environment: integration
+    runs-on: production_runner
+    environment: production
     steps:
       - name: Checkout code
         uses: actions/checkout@v3

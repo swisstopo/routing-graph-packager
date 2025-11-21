@@ -1,14 +1,14 @@
-name: Deploy -> int
+name: Deploy -> local
 on:
   push:
     branches:
-      - main  # TODO: set on master or your deployment branch
+      - main  # or your deployment branch
   workflow_dispatch:
 
 jobs:
   deploy:
-    runs-on: integration_runner
-    environment: integration
+    runs-on: localhost_runner
+    environment: localhost
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
