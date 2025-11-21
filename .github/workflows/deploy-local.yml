@@ -37,6 +37,8 @@ jobs:
           TMP_DATA_DIR=${{ vars.TMP_DATA_DIR }}
           EOF
 
+          cp .docker_env .env
+
       - name: Pull latest images
         run: |
           docker-compose pull
