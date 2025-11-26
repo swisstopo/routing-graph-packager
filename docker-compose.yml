@@ -29,6 +29,7 @@ services:
     # mostly needed to define the database hosts
     env_file:
       - .docker_env
+      - .env
     networks:
       - routing-packager
     ports:
@@ -41,6 +42,7 @@ services:
       # mostly needed to define the database hosts
     env_file:
       - .docker_env
+      - .env
     networks:
       - routing-packager
     restart: always
@@ -52,6 +54,7 @@ services:
     # mostly needed to define the database hosts
     env_file:
       - .docker_env
+      - .env
     networks:
       - routing-packager
     volumes:
@@ -72,6 +75,7 @@ services:
     # mostly needed to define the database hosts
     env_file:
       - .docker_env
+      - .env
     volumes:
       - packages:/app/data
       - tmp_data:/app/tmp_data
