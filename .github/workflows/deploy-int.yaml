@@ -2,7 +2,7 @@ name: Deploy -> int
 on:
   push:
     branches:
-      - main  # TODO: set on master or your deployment branch
+      - master
   workflow_dispatch:
 
 jobs:
