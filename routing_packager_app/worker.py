@@ -80,6 +80,7 @@ async def create_package(
         for port in (8002, 8003):
             try:
                 status = requests.get(f"{SETTINGS.VALHALLA_URL}:{port}/status").status_code
+                LOGGER.info(f"checking {SETTINGS.VALHALLA_URL}:{port}/status", extra=log_extra)
                 # 301 is what the test "expects" due to the simple HTTP server
                 if status not in (HTTP_200_OK, HTTP_301_MOVED_PERMANENTLY):
                     continue
