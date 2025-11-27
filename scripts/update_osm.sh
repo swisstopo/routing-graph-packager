@@ -10,10 +10,8 @@
 # (crontab -l || true; echo "0 3 * * * /path/to/this/script.sh > /some_log.txt") | crontab -
 #
 
-# Change these addresses if applicable
-# TODO: activate proxy again for swisstopo
-export http_proxy=http://prxp01.admin.ch:8080
-export https_proxy=http://prxp01.admin.ch:8080
+log_message "update-osm http_proxy set to: $http_proxy"
+log_message "update-osm https_proxy set to: $https_proxy"
 
 usage()
 {
@@ -41,7 +39,7 @@ while [ "$1" != "" ]; do
     shift
 done
 
-log_message "Updating ${pbf} with the proxy settings: http_proxy: $http_proxy, https_proxy: $https_proxy"
+log_message "Updating ${pbf}"
 fn=$(basename "${pbf}")
 pbf_dir=$(dirname "$pbf")
 pbf_name_updated="updated_${fn}"
