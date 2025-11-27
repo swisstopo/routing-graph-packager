@@ -38,6 +38,7 @@ jobs:
           MAX_CACHE_SIZE=${{ vars.MAX_CACHE_SIZE }}
           HTTP_PROXY=${{ vars.HTTP_PROXY }}
           HTTPS_PROXY=${{ vars.HTTPS_PROXY }}
+          NO_PROXY=${{ vars.NO_PROXY }}
           EOF
 
           cat > .env <<EOF
