@@ -14,8 +14,14 @@
 
 # so it can see prime_server within the supervisor process
 export LD_LIBRARY_PATH=/usr/local/lib
-export http_proxy=http://prxp01.admin.ch:8080
-export https_proxy=http://prxp01.admin.ch:8080
+
+#set from .docker_env file
+log_message "INFO: http_proxy set to $http_proxy"
+log_message "INFO: https_proxy set to $https_proxy"
+
+#set from .docker_env file in conf/valhalla.conf
+log_message "INFO: CONCURRENCY set to $CONCURRENCY"
+log_message "INFO: https_proxy set to $MAX_CACHE_SIZE"
 
 log_message() {
     echo "build_loop: $(date "+%Y-%m-%d %H:%M:%S") $1"
@@ -59,8 +65,6 @@ PBF="/app/tmp_data/osm/planet-latest.osm.pbf"
 # activate the virtual env so the CLI can do its job in the supervisor env
 . /app/app_venv/bin/activate
 
-CONCURRENCY="8"
-MAX_CACHE_SIZE="2000000000"
 CURRENT_PORT=""
 CURRENT_VALHALLA_DIR=""
 OLD_PORT=""
