@@ -1,9 +1,10 @@
 name: Deploy -> int
-
+  
 on:
-  registry_package:
-    types: [published]
-
+  workflow_run:
+    workflows: ["publish"]
+    types:
+      - completed
   workflow_dispatch:
 
 jobs:
