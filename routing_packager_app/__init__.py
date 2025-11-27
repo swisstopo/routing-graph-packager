@@ -17,9 +17,6 @@ def create_app(lifespan: Optional[Lifespan[FastAPI]]):
 
     with open(SETTINGS.DESCRIPTION_PATH) as fh:
         description = fh.read()
-
-    app = FastAPI(title="Routing Graph Packager App", description=description, lifespan=lifespan)
-    app.mount("/static", StaticFiles(directory="/app/static"), name="static")
     
     BASE_DIR = Path(__file__).resolve().parent
     app.mount("/static", StaticFiles(directory=f"{BASE_DIR}/static"), name="static")
