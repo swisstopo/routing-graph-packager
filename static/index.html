@@ -546,7 +546,8 @@
                                 <!-- links with different endpoints -->
                                 <a id="workerLogLink" href="#">worker</a>&nbsp;&nbsp;&nbsp;&nbsp;<a id="appLogLink"
                                         href="#">app</a>&nbsp;&nbsp;&nbsp;&nbsp;<a id="builderLogLink"
-                                        href="#">builder</a>
+                                        href="#">builder</a>&nbsp;&nbsp;&nbsp;&nbsp;<a id="supervisorLogLink"
+                                        href="#">supervisor</a>
 
 
                                 <div id="response-container">
@@ -599,6 +600,7 @@
                                                 $('#workerLogLink').on('click', function (event) { openLink(event, 'worker'); });
                                                 $('#appLogLink').on('click', function (event) { openLink(event, 'app'); });
                                                 $('#builderLogLink').on('click', function (event) { openLink(event, 'builder'); });
+											    $('#supervisorLogLink').on('click', function (event) { openLink(event, 'supervisor'); });
                                         });
                                 </script>
                         </div>
