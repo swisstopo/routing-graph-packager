@@ -15,6 +15,10 @@
 # so it can see prime_server within the supervisor process
 export LD_LIBRARY_PATH=/usr/local/lib
 
+log_message() {
+    echo "build_loop: $(date "+%Y-%m-%d %H:%M:%S") $1"
+}
+
 #set from .docker_env file
 log_message "INFO: http_proxy set to $http_proxy"
 log_message "INFO: https_proxy set to $https_proxy"
@@ -22,10 +26,6 @@ log_message "INFO: https_proxy set to $https_proxy"
 #set from .docker_env file in conf/valhalla.conf
 log_message "INFO: CONCURRENCY set to $CONCURRENCY"
 log_message "INFO: https_proxy set to $MAX_CACHE_SIZE"
-
-log_message() {
-    echo "build_loop: $(date "+%Y-%m-%d %H:%M:%S") $1"
-}
 
 # watch the .lock file every 10 secs
 wait_for_lock() {
