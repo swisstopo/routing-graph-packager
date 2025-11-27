@@ -4,6 +4,7 @@ from starlette.types import Lifespan
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
+from pathlib import Path
 
 from .api_v1 import api_v1_router
 from .config import SETTINGS
