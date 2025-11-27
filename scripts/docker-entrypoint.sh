@@ -19,7 +19,6 @@ elif [ "${cmd}" == 'app' ]; then
   #Propagate env values for supervisord
   CONF_FILE="/etc/supervisor/conf.d/valhalla.conf"
   sed -i \
-    -e "s|%(ENV_TMP_DATA_DIR)s|${TMP_DATA_DIR}|g" \
     -e "s|%(ENV_MAX_CACHE_SIZE)s|${MAX_CACHE_SIZE}|g" \
     -e "s|%(ENV_CONCURRENCY)s|${CONCURRENCY}|g" \
     "$CONF_FILE"
