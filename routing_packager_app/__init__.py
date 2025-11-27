@@ -4,6 +4,7 @@ from starlette.types import Lifespan
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
+from pathlib import Path
 
 from .api_v1 import api_v1_router
 from .config import SETTINGS
@@ -16,9 +17,6 @@ def create_app(lifespan: Optional[Lifespan[FastAPI]]):
 
     with open(SETTINGS.DESCRIPTION_PATH) as fh:
         description = fh.read()
-
-    app = FastAPI(title="Routing Graph Packager App", description=description, lifespan=lifespan)
-    app.mount("/static", StaticFiles(directory="/app/static"), name="static")
     
     BASE_DIR = Path(__file__).resolve().parent
     app.mount("/static", StaticFiles(directory=f"{BASE_DIR}/static"), name="static")
