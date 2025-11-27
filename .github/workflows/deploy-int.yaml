@@ -35,6 +35,9 @@ jobs:
           SSL_CERT=${{ vars.SSL_CERT }}
           SSL_KEY=${{ vars.SSL_KEY }}
           CONCURRENCY=${{ vars.CONCURRENCY }}
+          MAX_CACHE_SIZE=${{ vars.MAX_CACHE_SIZE }}
+          http_proxy=${{ vars.HTTP_PROXY }}
+          https_proxy=${{ vars.HTTPS_PROXY }}
           EOF
 
           cat > .env <<EOF
