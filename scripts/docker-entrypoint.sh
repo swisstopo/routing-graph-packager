@@ -21,6 +21,8 @@ elif [ "${cmd}" == 'app' ]; then
   sed -i \
     -e "s|%(ENV_MAX_CACHE_SIZE)s|${MAX_CACHE_SIZE}|g" \
     -e "s|%(ENV_CONCURRENCY)s|${CONCURRENCY}|g" \
+    -e "s|%(ENV_HTTP_PROXY)s|${HTTP_PROXY}|g" \
+    -e "s|%(ENV_HTTPS_PROXY)s|${HTTPS_PROXY}|g" \
     "$CONF_FILE"
   
   # make sure the log directory exists for supervisor to be able to log

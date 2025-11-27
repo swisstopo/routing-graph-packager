@@ -25,7 +25,7 @@ log_message "INFO: https_proxy set to $https_proxy"
 
 #set from .docker_env file in conf/valhalla.conf
 log_message "INFO: CONCURRENCY set to $CONCURRENCY"
-log_message "INFO: https_proxy set to $MAX_CACHE_SIZE"
+log_message "INFO: MAX_CACHE_SIZE set to $MAX_CACHE_SIZE"
 
 # watch the .lock file every 10 secs
 wait_for_lock() {
