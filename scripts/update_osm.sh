@@ -10,9 +10,6 @@
 # (crontab -l || true; echo "0 3 * * * /path/to/this/script.sh > /some_log.txt") | crontab -
 #
 
-log_message "update-osm http_proxy set to: $http_proxy"
-log_message "update-osm https_proxy set to: $https_proxy"
-
 usage()
 {
     echo "usage: update_osm.sh --pbf/-p /app/data/osm/planet-latest.osm.pbf"
@@ -21,6 +18,9 @@ usage()
 log_message() {
     echo "build_loop: $(date "+%Y-%m-%d %H:%M:%S") $1"
 }
+
+log_message "update-osm http_proxy set to: $http_proxy"
+log_message "update-osm https_proxy set to: $https_proxy"
 
 pbf=/app/tmp_data/osm/planet-latest.osm.pbf
 
