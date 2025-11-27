@@ -195,3 +195,4 @@ class LogType(str, Enum):
     WORKER = "worker"
     APP = "app"
     BUILDER = "builder"
+    SUPERVISOR = "supervisor"
