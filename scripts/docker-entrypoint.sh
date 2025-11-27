@@ -26,7 +26,7 @@ elif [ "${cmd}" == 'app' ]; then
     -e "s|%(ENV_CONCURRENCY)s|${CONCURRENCY}|g" \
     -e "s|%(ENV_HTTP_PROXY)s|${HTTP_PROXY}|g" \
     -e "s|%(ENV_HTTPS_PROXY)s|${HTTPS_PROXY}|g" \
-    -e "s|%(ENV_HTTPS_PROXY)s|${NO_PROXY}|g" \
+    -e "s|%(ENV_NO_PROXY)s|${NO_PROXY}|g" \
     "$CONF_FILE"
   
   # make sure the log directory exists for supervisor to be able to log
