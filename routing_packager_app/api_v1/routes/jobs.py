@@ -171,12 +171,21 @@ async def delete_job(
     job_id: int,
     db: Session = Depends(get_db),
     auth: HTTPBasicCredentials = Depends(BasicAuth),
+    key: str = Depends(HeaderKey),
 ):
     """DELETE a single job. Will also stop the job if it's in progress. Needs admin privileges."""
+    
+    # check api key is valid and active
+    matched_key = APIKeys.check_key(db, key, APIPermission.INTERNAL)
+    
     # first authenticate
     req_user = User.get_user(db, auth)
-    if not req_user:
-        raise HTTPException(HTTP_401_UNAUTHORIZED, "Not authorized to delete a user.")
+    if not req_user and not matched_key:
+        raise HTTPException(
+            HTTP_401_UNAUTHORIZED,
+            "No valid authentication method provided. Possible authentication methods: API key"
+            "(x-key header) username/password (basic auth).",
+        )
 
     # get job or 404
     db_job: Job | None = db.get(Job, job_id)
