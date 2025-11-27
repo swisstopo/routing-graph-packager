@@ -176,7 +176,7 @@ async def delete_job(
     """DELETE a single job. Will also stop the job if it's in progress. Needs admin privileges."""
     
     # check api key is valid and active
-    matched_key = APIKeys.check_key(db, key, APIPermission.READ)
+    matched_key = APIKeys.check_key(db, key, APIPermission.INTERNAL)
     
     # first authenticate
     req_user = User.get_user(db, auth)
