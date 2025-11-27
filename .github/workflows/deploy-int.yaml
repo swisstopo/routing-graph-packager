@@ -1,8 +1,8 @@
 name: Deploy -> int
 on:
-  push:
-    branches:
-      - master
+  registry_package:
+    types: [published]
+
   workflow_dispatch:
 
 jobs:
