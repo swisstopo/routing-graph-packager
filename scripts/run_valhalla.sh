@@ -107,12 +107,7 @@ while true; do
     # wget https://download.geofabrik.de/europe/andorra-latest.osm.pbf -O "$PBF" || exit 1
     UPDATE_OSM="False"
   fi
-
-  if [[ $UPDATE_OSM == "True" ]]; then
-    log_message "INFO: Updating OSM file $PBF"
-    update_osm.sh -p "$PBF" || exit 1
-  fi
-
+  
   # build the current config
   log_message "INFO: Building valhalla.json to $CURRENT_VALHALLA_DIR"
   valhalla_config="$CURRENT_VALHALLA_DIR/valhalla.json"
@@ -143,6 +138,12 @@ while true; do
     continue
   fi
 
+  # Not the first run, build the second graph.
+  if [[ $UPDATE_OSM == "True" ]]; then
+    log_message "INFO: Updating OSM file $PBF"
+    update_osm.sh -p "$PBF" || exit 1
+  fi
+  
   log_message "INFO: Building initial graph with $PBF..."
   valhalla_build_tiles -c "${valhalla_config}" -s initialize -e build "$PBF" || exit 1
 
