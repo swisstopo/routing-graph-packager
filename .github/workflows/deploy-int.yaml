@@ -56,3 +56,4 @@ jobs:
         run: |
           docker-compose down --remove-orphans
           docker-compose up -d
+          docker image prune -af
