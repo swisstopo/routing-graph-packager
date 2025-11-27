@@ -2,10 +2,13 @@
 
 cmd=${1}
 
-# either starts a worker or the app itself
+# starts the worker
+# access valhalla server with http://app
 if [ "${cmd}" == 'worker' ]; then
   # Start the worker
   exec /app/app_venv/bin/arq routing_packager_app.worker.WorkerSettings
+# starts the app
+# access valhalla server with http://app or http://localhost
 elif [ "${cmd}" == 'app' ]; then
   # SSL? Provided by .docker_env with path mapped in docker-compose.yml
   opts=''
@@ -23,6 +26,7 @@ elif [ "${cmd}" == 'app' ]; then
     -e "s|%(ENV_CONCURRENCY)s|${CONCURRENCY}|g" \
     -e "s|%(ENV_HTTP_PROXY)s|${HTTP_PROXY}|g" \
     -e "s|%(ENV_HTTPS_PROXY)s|${HTTPS_PROXY}|g" \
+    -e "s|%(ENV_NO_PROXY)s|${NO_PROXY}|g" \
     "$CONF_FILE"
   
   # make sure the log directory exists for supervisor to be able to log
