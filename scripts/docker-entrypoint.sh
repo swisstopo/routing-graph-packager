@@ -2,10 +2,13 @@
 
 cmd=${1}
 
-# either starts a worker or the app itself
+# starts the worker
+# access valhalla server with http://app
 if [ "${cmd}" == 'worker' ]; then
   # Start the worker
   exec /app/app_venv/bin/arq routing_packager_app.worker.WorkerSettings
+# starts the app
+# access valhalla server with http://app or http://localhost
 elif [ "${cmd}" == 'app' ]; then
   # SSL? Provided by .docker_env with path mapped in docker-compose.yml
   opts=''
