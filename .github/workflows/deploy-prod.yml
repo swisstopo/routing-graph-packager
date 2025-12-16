@@ -1,8 +1,6 @@
 name: Deploy -> prod
 on:
-#  push:
-#    branches:
-#      - main  # TODO: set on master or your deployment branch
+  #only manual trigger
   workflow_dispatch:
 
 jobs:
@@ -30,12 +28,21 @@ jobs:
           POSTGRES_DB=${{ vars.POSTGRES_DB }}
           POSTGRES_USER=${{ vars.POSTGRES_USER }}
           POSTGRES_PASS=${{ secrets.POSTGRES_PASS }}
-          SSL_CERT=${{ secrets.SSL_CERT }}
-          SSL_KEY=${{ secrets.SSL_KEY }}
+          SSL_CERT=${{ vars.SSL_CERT }}
+          SSL_KEY=${{ vars.SSL_KEY }}
           CONCURRENCY=${{ vars.CONCURRENCY }}
+          MAX_CACHE_SIZE=${{ vars.MAX_CACHE_SIZE }}
+          HTTP_PROXY=${{ vars.HTTP_PROXY }}
+          HTTPS_PROXY=${{ vars.HTTPS_PROXY }}
+          NO_PROXY=${{ vars.NO_PROXY }}
+          EOF
+
+          cat > .env <<EOF
           DATA_DIR=${{ vars.DATA_DIR }}
           TMP_DATA_DIR=${{ vars.TMP_DATA_DIR }}
           COMPOSE_PROJECT_NAME=${{ vars.COMPOSE_PROJECT_NAME }}
+          SSL_CERT_DIR=${{ vars.SSL_CERT_DIR }}
+          DOCKER_HOST=unix:///var/run/docker.sock
           EOF
 
       - name: Pull latest images
@@ -46,3 +53,4 @@ jobs:
         run: |
           docker-compose down --remove-orphans
           docker-compose up -d
+          docker image prune -af
