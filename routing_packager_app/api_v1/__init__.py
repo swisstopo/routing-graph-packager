@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from .routes import jobs, logs, users, api_keys
+from .routes import jobs, logs, users, api_keys, health
 
 api_v1_router = APIRouter()
 api_v1_router.include_router(jobs.router, prefix="/jobs", tags=["jobs"])
