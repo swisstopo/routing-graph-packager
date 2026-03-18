@@ -19,11 +19,11 @@ log_message() {
     echo "build_loop: $(date "+%Y-%m-%d %H:%M:%S") $1"
 }
 
-log_message "update-osm http_proxy set to: $http_proxy"
-log_message "update-osm https_proxy set to: $https_proxy"
-log_message "update-osm pbf_local_path set to: $pbf_local_path"
+log_message "update-osm HTTP_PROXY set to: $HTTP_PROXY"
+log_message "update-osm HTTPS_PROXY set to: $HTTPS_PROXY"
+log_message "update-osm PBF_LOCAL_PATH set to: $PBF_LOCAL_PATH"
 
-pbf=$pbf_local_path
+pbf="$PBF_LOCAL_PATH"
 
 # Get the arguments
 while [ "$1" != "" ]; do
