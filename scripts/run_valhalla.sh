@@ -20,9 +20,9 @@ log_message() {
 }
 
 #set from .docker_env file
-log_message "INFO: http_proxy set to $http_proxy"
-log_message "INFO: https_proxy set to $https_proxy"
-log_message "INFO: no_proxy set to $no_proxy"
+log_message "INFO: HTTP_PROXY set to $HTTP_PROXY"
+log_message "INFO: HTTPS_PROXY set to $HTTPS_PROXY"
+log_message "INFO: NO_PROXY set to $NO_PROXY"
 
 #set from .docker_env file in conf/valhalla.conf
 log_message "INFO: CONCURRENCY set to $CONCURRENCY"
