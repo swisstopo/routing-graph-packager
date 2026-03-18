@@ -21,8 +21,9 @@ log_message() {
 
 log_message "update-osm http_proxy set to: $http_proxy"
 log_message "update-osm https_proxy set to: $https_proxy"
+log_message "update-osm pbf_local_path set to: $pbf_local_path"
 
-pbf=/app/tmp_data/osm/planet-latest.osm.pbf
+pbf=$pbf_local_path
 
 # Get the arguments
 while [ "$1" != "" ]; do
