@@ -27,6 +27,8 @@ log_message "INFO: no_proxy set to $no_proxy"
 #set from .docker_env file in conf/valhalla.conf
 log_message "INFO: CONCURRENCY set to $CONCURRENCY"
 log_message "INFO: MAX_CACHE_SIZE set to $MAX_CACHE_SIZE"
+log_message "INFO: PBF_LOCAL_PATH set to $PBF_LOCAL_PATH"
+log_message "INFO: PBF_URL set to $PBF_URL"
 
 # watch the .lock file every 10 secs
 wait_for_lock() {
@@ -60,8 +62,7 @@ PORT_8003="8003"
 ELEVATION_DIR="$TMP_DATA_DIR/elevation"
 VALHALLA_DIR_8002="$TMP_DATA_DIR/osm/$PORT_8002"
 VALHALLA_DIR_8003="$TMP_DATA_DIR/osm/$PORT_8003"
-# TODO: change PBF
-PBF="/app/tmp_data/osm/planet-latest.osm.pbf"
+PBF="$PBF_LOCAL_PATH"
 
 # activate the virtual env so the CLI can do its job in the supervisor env
 . /app/app_venv/bin/activate
@@ -102,10 +103,7 @@ while true; do
   UPDATE_OSM="True"
   if ! [ -f "$PBF" ]; then
     log_message "INFO: Downloading OSM file $PBF"
-    wget -nv https://ftp5.gwdg.de/pub/misc/openstreetmap/planet.openstreetmap.org/pbf/planet-latest.osm.pbf -O "$PBF" || exit 1
-    # wget -nv https://ftp5.gwdg.de/pub/misc/openstreetmap/download.geofabrik.de/germany-latest.osm.pbf -O "$PBF" || exit 1
-    # wget -nv https://download.geofabrik.de/europe/iceland-latest.osm.pbf -O "$PBF" || exit 1
-    # wget https://download.geofabrik.de/europe/andorra-latest.osm.pbf -O "$PBF" || exit 1
+    wget -nv $PBF_URL -O "$PBF" || exit 1
     UPDATE_OSM="False"
   fi
   
