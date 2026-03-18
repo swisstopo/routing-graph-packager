@@ -103,7 +103,7 @@ while true; do
   UPDATE_OSM="True"
   if ! [ -f "$PBF" ]; then
     log_message "INFO: Downloading OSM file $PBF"
-    wget -nv $PBF_URL -O "$PBF" || exit 1
+    wget -nv "$PBF_URL" -O "$PBF" || exit 1
     UPDATE_OSM="False"
   fi
   
