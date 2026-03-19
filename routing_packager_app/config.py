@@ -35,8 +35,8 @@ class BaseSettings(_BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "gis"
-    POSTGRES_USER: str = "admin"
-    POSTGRES_PASS: str = "admin"
+    POSTGRES_USER: str = "docker"
+    POSTGRES_PASS: str = "docker"
     REDIS_URL: str = "redis://localhost"
 
     # SMTP ###
