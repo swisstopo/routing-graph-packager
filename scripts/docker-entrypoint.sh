@@ -23,6 +23,7 @@ elif [ "${cmd}" == 'app' ]; then
   CONF_FILE="/etc/supervisor/conf.d/valhalla.conf"
   sed -i \
     -e "s|%(ENV_MAX_CACHE_SIZE)s|${MAX_CACHE_SIZE}|g" \
+    -e "s|%(ENV_USE_ELEVATION)s|${USE_ELEVATION}|g" \
     -e "s|%(ENV_PBF_LOCAL_PATH)s|${PBF_LOCAL_PATH}|g" \
     -e "s|%(ENV_PBF_URL)s|${PBF_URL}|g" \
     -e "s|%(ENV_CONCURRENCY)s|${CONCURRENCY}|g" \

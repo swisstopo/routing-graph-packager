@@ -29,6 +29,7 @@ log_message "INFO: CONCURRENCY set to $CONCURRENCY"
 log_message "INFO: MAX_CACHE_SIZE set to $MAX_CACHE_SIZE"
 log_message "INFO: PBF_LOCAL_PATH set to $PBF_LOCAL_PATH"
 log_message "INFO: PBF_URL set to $PBF_URL"
+log_message "INFO: USE_ELEVATION set to $USE_ELEVATION"
 
 # watch the .lock file every 10 secs
 wait_for_lock() {
@@ -145,15 +146,19 @@ while true; do
   
   log_message "INFO: Building initial graph with $PBF..."
   valhalla_build_tiles -c "${valhalla_config}" -s initialize -e build "$PBF" || exit 1
+  
+  if [ "$USE_ELEVATION" = "true" ]; then
+    log_message "INFO: Downloading elevation to $ELEVATION_DIR..."
+    valhalla_build_elevation --from-tiles --decompress -c ${valhalla_config} -v || exit 1
+    # debugging with andorra only:
+    # valhalla_build_elevation --decompress -c ${valhalla_config} -v -b 1,42,2,43 || exit 1
 
-  log_message "INFO: Downloading elevation to $ELEVATION_DIR..."
-  valhalla_build_elevation --from-tiles --decompress -c ${valhalla_config} -v || exit 1
-  # debugging with andorra only:
-  # valhalla_build_elevation --decompress -c ${valhalla_config} -v -b 1,42,2,43 || exit 1
-
-  log_message "INFO: Enhancing initial tiles with elevation..."
-  valhalla_build_tiles -c "${valhalla_config}" -s enhance -e cleanup "$PBF" || exit 1
-
+    log_message "INFO: Enhancing initial tiles with elevation..."
+    valhalla_build_tiles -c "${valhalla_config}" -s enhance -e cleanup "$PBF" || exit 1
+  else
+    log_message "INFO: Skipping elevation enhancement."
+  fi
+  
   # reset config so the service won't load the graph
   reset_config
 
