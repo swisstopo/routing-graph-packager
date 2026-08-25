@@ -1,11 +1,17 @@
+import json
+import logging
+import shutil
 import subprocess
 import sys
 import threading
 
 import pytest
 
+from routing_packager_app.graph_build import builder
 from routing_packager_app.graph_build.builder import (
     BuildError,
+    _run,
+    build_graph,
     prune_generations,
     swap_graph_link,
     update_pbf,
@@ -157,9 +163,9 @@ def test_update_pbf_retries_until_current(tmp_path, monkeypatch):
 
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, next(codes))
+        return next(codes)
 
-    monkeypatch.setattr("routing_packager_app.graph_build.builder.subprocess.run", fake_run)
+    monkeypatch.setattr("routing_packager_app.graph_build.builder._run", fake_run)
     update_pbf(pbf)
 
     assert len(calls) == 3
@@ -169,10 +175,7 @@ def test_update_pbf_raises_on_server_error(tmp_path, monkeypatch):
     pbf = tmp_path.joinpath("planet.osm.pbf")
     pbf.write_bytes(b"")
 
-    monkeypatch.setattr(
-        "routing_packager_app.graph_build.builder.subprocess.run",
-        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 3),
-    )
+    monkeypatch.setattr("routing_packager_app.graph_build.builder._run", lambda cmd, **kwargs: 3)
     with pytest.raises(BuildError, match="exit code 3"):
         update_pbf(pbf)
 
@@ -182,9 +185,83 @@ def test_update_pbf_raises_when_never_current(tmp_path, monkeypatch):
     pbf.write_bytes(b"")
 
     monkeypatch.setattr("routing_packager_app.config.SETTINGS.PBF_MAX_UPDATE_PASSES", 2)
-    monkeypatch.setattr(
-        "routing_packager_app.graph_build.builder.subprocess.run",
-        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 1),
-    )
+    monkeypatch.setattr("routing_packager_app.graph_build.builder._run", lambda cmd, **kwargs: 1)
     with pytest.raises(BuildError, match="still behind"):
         update_pbf(pbf)
+
+
+def test_run_forwards_stdout_and_stderr_to_the_builder_log(caplog):
+    caplog.set_level(logging.INFO, logger="builder")
+    _run([
+        sys.executable,
+        "-c",
+        "import sys; print('to stdout'); print('to stderr', file=sys.stderr)",
+    ])
+
+    messages = [record.message for record in caplog.records]
+    assert "to stdout" in messages
+    assert "to stderr" in messages
+
+
+def test_run_logs_stderr_while_stdout_is_redirected(tmp_path, caplog):
+    caplog.set_level(logging.INFO, logger="builder")
+    out = tmp_path.joinpath("out.json")
+    with open(out, "w") as fh:
+        _run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; print('payload'); print('noise', file=sys.stderr)",
+            ],
+            stdout=fh,
+        )
+
+    assert out.read_text() == "payload\n"
+    assert "noise" in [record.message for record in caplog.records]
+
+
+def test_run_returns_the_exit_code_when_not_checking():
+    assert _run([sys.executable, "-c", "import sys; sys.exit(3)"], check=False) == 3
+
+
+def test_run_raises_on_a_failing_command():
+    with pytest.raises(BuildError, match="exit code 3"):
+        _run([sys.executable, "-c", "import sys; sys.exit(3)"])
+
+
+def test_build_graph_passes_top_level_logging_flags(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_run(cmd, stdout=None, check=True):
+        calls.append(cmd)
+        if stdout:
+            stdout.write("{}")
+        return 0
+
+    monkeypatch.setattr("routing_packager_app.config.SETTINGS.USE_ELEVATION", False)
+    monkeypatch.setattr(builder, "_run", fake_run)
+    build_graph(tmp_path.joinpath("generations"), tmp_path.joinpath("planet.osm.pbf"))
+
+    config_cmd = calls[0]
+    assert "--mjolnir-logging-type" not in config_cmd
+    assert config_cmd[config_cmd.index("--logging-type") + 1] == "std_out"
+    assert config_cmd[config_cmd.index("--logging-color") + 1] == "false"
+
+
+@pytest.mark.skipif(shutil.which("valhalla_build_config") is None, reason="Valhalla is not installed")
+def test_build_graph_writes_a_valid_valhalla_config(tmp_path, monkeypatch):
+    real_run = builder._run
+
+    def fake_run(cmd, stdout=None, check=True):
+        if cmd[0].endswith("valhalla_build_config"):
+            return real_run(cmd, stdout=stdout, check=check)
+        return 0
+
+    monkeypatch.setattr("routing_packager_app.config.SETTINGS.USE_ELEVATION", False)
+    monkeypatch.setattr(builder, "_run", fake_run)
+    generation = build_graph(tmp_path.joinpath("generations"), tmp_path.joinpath("planet.osm.pbf"))
+
+    config = json.loads(generation.joinpath("valhalla.json").read_text())
+    assert config["logging"]["type"] == "std_out"
+    assert config["logging"]["color"] is False
+    assert config["mjolnir"]["tile_dir"] == str(generation)

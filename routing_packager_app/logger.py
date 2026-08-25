@@ -61,6 +61,9 @@ def get_smtp_details(toaddrs: List[str]):
     return conf
 
 
+LOG_MAX_BYTES = 10 * 1024 * 1024
+LOG_BACKUP_COUNT = 10
+
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -95,19 +98,25 @@ LOGGING_CONFIG = {
     },
     "handlers": {
         "worker": {
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "formatter": "worker",
             "filename": str(SETTINGS.get_logging_dir() / "worker.log"),
+            "maxBytes": LOG_MAX_BYTES,
+            "backupCount": LOG_BACKUP_COUNT,
         },
         "app": {
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "formatter": "app",
             "filename": str(SETTINGS.get_logging_dir() / "app.log"),
+            "maxBytes": LOG_MAX_BYTES,
+            "backupCount": LOG_BACKUP_COUNT,
         },
         "builder": {
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "formatter": "builder",
             "filename": str(SETTINGS.get_logging_dir() / "builder.log"),
+            "maxBytes": LOG_MAX_BYTES,
+            "backupCount": LOG_BACKUP_COUNT,
         },
         "default": {"class": "logging.StreamHandler", "formatter": "std", "stream": "ext://sys.stdout"},
     },

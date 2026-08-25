@@ -212,3 +212,4 @@ class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(SETTINGS.REDIS_URL)
     functions = [create_package, update_all_packages]
     job_timeout = 60 * 60 * 24
+    health_check_interval = 60

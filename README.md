@@ -119,28 +119,80 @@ The app is listening on `/api/v1/jobs` for new `POST` requests to generate some 
 
 ### Logs
 
-The app exposes logs via the route `/api/v1/logs/{log_type}`. Available log types are `worker`, `app` and `builder`. The graph builder additionally logs to stdout, so `docker logs routing-packager-graph-build` works too. An optional query parameter `?lines={n}` limits the output to the last `n` lines. Authentication is required.
+The app exposes logs via the route `/api/v1/logs/{log_type}`. Available log types are `worker`, `app` and `builder`. The `builder` log holds the full output of `valhalla_build_tiles` and the PBF update, not just the build loop's own messages. The graph builder additionally logs to stdout, so `docker logs routing-packager-graph-build` works too. An optional query parameter `?lines={n}` limits the output to the last `n` lines. Authentication is required.
+
+All three log files rotate at 10 MB and keep 10 archives, so `$TMP_DATA_DIR/logs` stays bounded. The endpoint always serves the live file.
 
 ### Health
 
-`GET /api/v1/health` reports the graph generation currently being served, read from the `build_meta.json` the builder writes into every generation:
+`GET /api/v1/health` reports the graph being served, what the graph builder is doing, and whether the backing services are reachable. **Authentication is required** — basic auth or an `internal` API key. This is a breaking change: the endpoint used to answer anyone.
 
 ```json
 {
+  "status": "degraded",
   "graph": {
     "available": true,
     "path": "/app/tmp_data/osm/graph",
     "generation": "20260825T030000",
     "built_at": "2026-08-25T04:12:56.310000+00:00",
     "pbf_path": "/app/tmp_data/planet-latest.osm.pbf",
-    "pbf_modified": "2026-08-25T03:01:44.000000+00:00",
+    "pbf_modified": "2026-08-25T03:01:44+00:00",
     "elevation": true,
-    "valhalla_version": "valhalla 3.5.1"
+    "valhalla_version": "3.8.3"
+  },
+  "build": {
+    "state": "building",
+    "stage": "building_tiles",
+    "generation": "20260825T113047",
+    "started_at": "2026-08-25T11:30:47+00:00",
+    "updated_at": "2026-08-25T11:42:03+00:00",
+    "stale": false,
+    "next_build_at": null,
+    "last_error": null
+  },
+  "services": {
+    "postgres": {"up": true, "error": null},
+    "redis": {"up": true, "error": null},
+    "worker": {
+      "up": false,
+      "last_report": "Aug-25 11:41:20",
+      "queued": 2,
+      "ongoing": 0,
+      "complete": 41,
+      "failed": 1,
+      "retried": 0
+    }
   }
 }
 ```
 
-`"available": false` means no graph has been built yet, or the symlink points at something unreadable. Note this replaces the previous `{"valhalla": {"8002": ..., "8003": ...}}` response, which reported on two Valhalla services that no longer run.
+`status` is `ok` when a graph is available and Postgres, Redis and the worker are all up, `degraded` otherwise. The response code is 200 either way — a fresh deployment that has not built a graph yet is degraded but not broken.
+
+#### `graph`
+
+The generation currently symlinked, read from the `build_meta.json` the builder writes into it. `"available": false` means no graph has been built yet, or the symlink points at something unreadable. Note this replaces the previous `{"valhalla": {"8002": ..., "8003": ...}}` response, which reported on two Valhalla services that no longer run.
+
+#### `build`
+
+Read from `$TMP_DATA_DIR/<provider>/build_status.json`, which the graph build container rewrites atomically at every step.
+
+| field | meaning |
+|---|---|
+| `state` | `idle`, `building`, `failed`, or `unknown` before the builder has ever run |
+| `stage` | while building: `pruning`, `downloading_pbf`, `updating_pbf`, `building_tiles`, `building_elevation`, `enhancing_tiles` or `swapping` |
+| `generation` | the directory the running build writes into, which is not yet the one being served |
+| `updated_at` | refreshed continuously while a build runs, so it doubles as a heartbeat |
+| `stale` | `true` when `state` is `building` but the heartbeat stopped — the build container died mid-run |
+| `next_build_at` | the next `GRAPH_BUILD_CRON` occurrence, set while idle |
+| `last_error` | why the last build gave up, kept alongside the `stage` it died on |
+
+A stale or failed build does not affect `graph.available`: the previously built generation is still there and still serveable.
+
+#### `services`
+
+Postgres is checked with a `SELECT 1`, Redis with a `PING`. The worker's entry comes from the health-check key ARQ's worker maintains: it is written every `health_check_interval` seconds (60, set in `WorkerSettings`) with a TTL one second longer, and deleted outright when the worker shuts down cleanly. So `"up": false` means the worker either stopped or has been unresponsive for more than a minute. `queued` is read live from the job queue; the remaining counters are the worker's own totals since it started.
+
+Because Postgres backs both authentication methods, the endpoint also accepts the admin credentials from `ADMIN_EMAIL`/`ADMIN_PASS` without a database round-trip. That is what lets it still answer, and report `postgres.up = false`, when Postgres is the thing that is down.
 
 ### Authentication and Authorization 
 

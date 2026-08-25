@@ -16,11 +16,13 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import List, TextIO
 
 from ..config import SETTINGS
+from ..constants import BuildStage
 from ..logger import BUILD_LOGGER
 from ..utils.file_utils import LOCK_NAME, create_lock_file, lock_exclusive
+from .status import BUILD_STATUS
 
 GENERATION_FORMAT = "%Y%m%dT%H%M%S"
 
@@ -37,11 +39,23 @@ def _binary(name: str) -> str:
     return shutil.which(name) or name
 
 
-def _run(cmd: List[str], **kwargs) -> None:
+def _run(cmd: List[str], stdout: TextIO | None = None, check: bool = True) -> int:
     BUILD_LOGGER.info(f"Running {' '.join(cmd)}")
-    completed = subprocess.run(cmd, **kwargs)
-    if completed.returncode != 0:
-        raise BuildError(f"'{cmd[0]}' failed with exit code {completed.returncode}")
+    with subprocess.Popen(
+        cmd,
+        stdout=stdout or subprocess.PIPE,
+        stderr=subprocess.PIPE if stdout else subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    ) as process:
+        for line in process.stderr if stdout else process.stdout:
+            BUILD_LOGGER.info(line.rstrip())
+            BUILD_STATUS.heartbeat()
+
+    if check and process.returncode != 0:
+        raise BuildError(f"'{cmd[0]}' failed with exit code {process.returncode}")
+
+    return process.returncode
 
 
 def _valhalla_version() -> str:
@@ -84,6 +98,7 @@ def prune_generations(generations_dir: Path, link: Path, keep: int, timeout: flo
     """
 
     # if the passed directory does not exist, there is nothing to do
+    BUILD_STATUS.stage(BuildStage.PRUNING)
     if not generations_dir.is_dir():
         return []
 
@@ -137,6 +152,7 @@ def download_pbf(pbf: Path) -> None:
 
     :param pbf: where the PBF should end up.
     """
+    BUILD_STATUS.stage(BuildStage.DOWNLOADING_PBF)
     pbf.parent.mkdir(parents=True, exist_ok=True)
     BUILD_LOGGER.info(f"Downloading {SETTINGS.PBF_URL} to {pbf}")
     _run(["wget", "-nv", SETTINGS.PBF_URL, "-O", str(pbf)])
@@ -155,6 +171,7 @@ def update_pbf(pbf: Path) -> None:
     Note that pyosmium does not expose this functionality conveniently via the library, so we
     have to use subprocess.
     """
+    BUILD_STATUS.stage(BuildStage.UPDATING_PBF)
     cmd = [
         _binary("pyosmium-up-to-date"),
         "-v",
@@ -169,7 +186,7 @@ def update_pbf(pbf: Path) -> None:
 
     for attempt in range(1, SETTINGS.PBF_MAX_UPDATE_PASSES + 1):
         BUILD_LOGGER.info(f"Updating {pbf}, pass {attempt}")
-        returncode = subprocess.run(cmd).returncode
+        returncode = _run(cmd, check=False)
         if returncode == 0:
             BUILD_LOGGER.info(f"{pbf} is up to date.")
             return
@@ -195,9 +212,11 @@ def build_graph(generations_dir: Path, pbf: Path) -> Path:
 
     :returns: the generation directory holding the finished tile set.
     """
+    BUILD_STATUS.stage(BuildStage.BUILDING_TILES)
     generation = generations_dir.joinpath(datetime.now(timezone.utc).strftime(GENERATION_FORMAT))
     generation.mkdir(parents=True)
     create_lock_file(generation)
+    BUILD_STATUS.generation(generation.name)
 
     elevation_dir = SETTINGS.get_elevation_dir()
     elevation_dir.mkdir(parents=True, exist_ok=True)
@@ -218,8 +237,10 @@ def build_graph(generations_dir: Path, pbf: Path) -> Path:
                 str(SETTINGS.CONCURRENCY),
                 "--mjolnir-max-cache-size",
                 str(SETTINGS.MAX_CACHE_SIZE),
-                "--mjolnir-logging-type",
-                "",
+                "--logging-type",
+                "std_out",
+                "--logging-color",
+                "false",
             ],
             stdout=fh,
         )
@@ -236,6 +257,7 @@ def build_graph(generations_dir: Path, pbf: Path) -> Path:
     ])
 
     if SETTINGS.USE_ELEVATION:
+        BUILD_STATUS.stage(BuildStage.BUILDING_ELEVATION)
         _run([
             _binary("valhalla_build_elevation"),
             "--from-tiles",  # makes sure we only download the elevation tiles we need
@@ -244,6 +266,7 @@ def build_graph(generations_dir: Path, pbf: Path) -> Path:
             str(config_path),
             "-v",
         ])
+        BUILD_STATUS.stage(BuildStage.ENHANCING_TILES)
         _run([
             _binary("valhalla_build_tiles"),
             "-c",
@@ -296,6 +319,7 @@ def swap_graph_link(link: Path, generation: Path) -> None:
     :param link: the graph symlink.
     :param generation: the generation it should point at.
     """
+    BUILD_STATUS.stage(BuildStage.SWAPPING)
     # make sure the directory exists
     link.parent.mkdir(parents=True, exist_ok=True)
     staged = link.with_name(link.name + ".tmp")

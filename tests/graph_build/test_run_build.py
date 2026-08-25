@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 
@@ -6,6 +7,7 @@ import pytest
 from routing_packager_app.config import SETTINGS
 from routing_packager_app.graph_build import __main__ as graph_build_main
 from routing_packager_app.graph_build.builder import BuildError
+from routing_packager_app.graph_build.status import BUILD_STATUS, BuildStatus
 from routing_packager_app.utils.file_utils import create_lock_file
 
 HOLD_BUILD_LOCK = """
@@ -31,6 +33,11 @@ def build_env(tmp_path, monkeypatch):
         enqueued.append(True)
 
     monkeypatch.setattr(graph_build_main, "_enqueue_package_updates", fake_enqueue)
+
+    status_path = tmp_path.joinpath("build_status.json")
+    monkeypatch.setattr(BUILD_STATUS, "path", status_path)
+    monkeypatch.setattr(BUILD_STATUS, "_data", BuildStatus(status_path)._data)
+    monkeypatch.setattr(BUILD_STATUS, "_last_heartbeat", 0.0)
 
     return tmp_path, enqueued
 
@@ -94,6 +101,28 @@ def test_failed_build_keeps_the_current_graph(build_env, monkeypatch):
 
     assert SETTINGS.get_graph_link().resolve().name == "20260201T000000"
     assert enqueued == []
+
+
+def test_run_build_reports_going_idle(build_env, monkeypatch):
+    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
+    graph_build_main.run_build("osm")
+    report = json.loads(BUILD_STATUS.path.read_text())
+
+    assert report["state"] == "idle"
+    assert report["stage"] is None
+
+
+def test_run_build_reports_the_stage_it_reached(build_env, monkeypatch):
+    def failing_build(*_args):
+        raise BuildError("valhalla_build_tiles blew up")
+
+    monkeypatch.setattr(graph_build_main, "build_graph", failing_build)
+    with pytest.raises(BuildError):
+        graph_build_main.run_build("osm")
+    report = json.loads(BUILD_STATUS.path.read_text())
+
+    assert report["state"] == "building"
+    assert report["stage"] == "pruning"
 
 
 def test_run_build_skips_when_another_build_holds_the_lock(build_env, monkeypatch):

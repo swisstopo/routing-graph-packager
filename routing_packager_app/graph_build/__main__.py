@@ -12,6 +12,7 @@ from ..config import SETTINGS
 from ..constants import Providers
 from ..logger import BUILD_LOGGER
 from ..utils.file_utils import lock_exclusive
+from .status import BUILD_STATUS
 from .builder import (
     BuildError,
     build_graph,
@@ -31,6 +32,10 @@ def _handle_signal(signum, _frame) -> None:
     global _stop
     _stop = True
     BUILD_LOGGER.info(f"Received signal {signum}, stopping after the current step.")
+
+
+def _next_build_at() -> datetime:
+    return croniter(SETTINGS.GRAPH_BUILD_CRON, datetime.now(timezone.utc)).get_next(datetime)
 
 
 def _sleep_until(when: datetime) -> None:
@@ -89,6 +94,8 @@ def run_build(provider: str) -> None:
         write_build_meta(generation, pbf)
         swap_graph_link(link, generation)
 
+    BUILD_STATUS.idle()
+
     # the build ran, so its time to re-create
     # existing packages with the new data
     asyncio.run(_enqueue_package_updates())
@@ -113,7 +120,7 @@ def main() -> int:
     if not link.is_symlink():
         BUILD_LOGGER.info("No graph generation available yet, building immediately.")
     else:
-        _sleep_until(croniter(SETTINGS.GRAPH_BUILD_CRON, datetime.now(timezone.utc)).get_next(datetime))
+        _sleep_until(_next_build_at())
 
     # keep trying to run a single build
     # this while loop just tries to acquire an exclusive lock on
@@ -126,12 +133,17 @@ def main() -> int:
             run_build(provider)
         except BuildError as e:
             BUILD_LOGGER.critical(f"Graph build failed, keeping the current graph: {e}")
+            BUILD_STATUS.failed(str(e))
         except Exception as e:  # pragma: no cover
             BUILD_LOGGER.critical(f"Graph build failed unexpectedly, keeping the current graph: {e}")
+            BUILD_STATUS.failed(str(e))
 
         if _stop:
             break
-        _sleep_until(croniter(SETTINGS.GRAPH_BUILD_CRON, datetime.now(timezone.utc)).get_next(datetime))
+
+        when = _next_build_at()
+        BUILD_STATUS.idle(when)
+        _sleep_until(when)
 
     BUILD_LOGGER.info("Graph builder stopped.")
 

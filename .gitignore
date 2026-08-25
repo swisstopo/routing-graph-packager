@@ -18,6 +18,7 @@ scan*.txt
 .env
 tests/tmp_data/
 tests/data/output/
+local_data/
 
 .vscode/
 

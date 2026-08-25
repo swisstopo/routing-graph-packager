@@ -1,6 +1,6 @@
 #--- BEGIN Usual Python stuff ---
 
-FROM ghcr.io/valhalla/valhalla:latest AS builder
+FROM ghcr.io/valhalla/valhalla:3.8.3 AS builder
 LABEL org.opencontainers.image.authors="Nils Nolde <nils@gis-ops.com>, Christian Beiwinkel <chrstn@bwnkl.de>"
 
 WORKDIR /app
@@ -32,7 +32,7 @@ RUN . app_venv/bin/activate && ${UV_BIN} pip install --editable . && mkdir -p /a
 # Do some Valhalla stuff
 # remove some stuff from the original image
 RUN cd /usr/local/bin && \
-  preserve="valhalla_service valhalla_build_tiles valhalla_build_config valhalla_build_admins valhalla_build_timezones valhalla_build_elevation valhalla_ways_to_edges valhalla_build_extract valhalla_export_edges valhalla_add_predicted_traffic" && \
+  preserve="valhalla_build_tiles valhalla_build_config valhalla_build_admins valhalla_build_timezones valhalla_build_elevation valhalla_ways_to_edges valhalla_build_extract valhalla_export_edges valhalla_add_predicted_traffic" && \
   mv $preserve .. && \
   for f in valhalla*; do rm $f; done && \
   cd .. && mv $preserve ./bin

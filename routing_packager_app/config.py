@@ -101,6 +101,12 @@ class BaseSettings(_BaseSettings):
         """
         return self.get_provider_dir(provider).joinpath(".build.lock")
 
+    def get_build_status_path(self, provider: str = Providers.OSM.lower()) -> Path:
+        """
+        Return the file the graph builder publishes its current stage to.
+        """
+        return self.get_provider_dir(provider).joinpath("build_status.json")
+
     def get_pbf_path(self) -> Path:
         """
         Return the local OSM PBF the graph is built from.
