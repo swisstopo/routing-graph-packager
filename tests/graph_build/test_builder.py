@@ -10,6 +10,7 @@ import pytest
 from routing_packager_app.graph_build import builder
 from routing_packager_app.graph_build.builder import (
     BuildError,
+    _log_tag,
     _run,
     build_graph,
     prune_generations,
@@ -199,8 +200,9 @@ def test_run_forwards_stdout_and_stderr_to_the_builder_log(caplog):
     ])
 
     messages = [record.message for record in caplog.records]
-    assert "to stdout" in messages
-    assert "to stderr" in messages
+    tag = _log_tag([sys.executable])
+    assert f"{tag} to stdout" in messages
+    assert f"{tag} to stderr" in messages
 
 
 def test_run_logs_stderr_while_stdout_is_redirected(tmp_path, caplog):
@@ -217,7 +219,8 @@ def test_run_logs_stderr_while_stdout_is_redirected(tmp_path, caplog):
         )
 
     assert out.read_text() == "payload\n"
-    assert "noise" in [record.message for record in caplog.records]
+    tag = _log_tag([sys.executable])
+    assert f"{tag} noise" in [record.message for record in caplog.records]
 
 
 def test_run_returns_the_exit_code_when_not_checking():
@@ -265,3 +268,29 @@ def test_build_graph_writes_a_valid_valhalla_config(tmp_path, monkeypatch):
     assert config["logging"]["type"] == "std_out"
     assert config["logging"]["color"] is False
     assert config["mjolnir"]["tile_dir"] == str(generation)
+
+
+def test_valhalla_binaries_share_one_log_tag():
+    assert _log_tag(["/usr/local/bin/valhalla_build_tiles"]) == "[VALHALLA]"
+    assert _log_tag(["/usr/local/bin/valhalla_build_config"]) == "[VALHALLA]"
+    assert _log_tag(["/usr/local/bin/valhalla_build_elevation"]) == "[VALHALLA]"
+
+
+def test_other_tools_are_not_tagged_as_valhalla():
+    assert _log_tag(["wget"]) == "[WGET]"
+    assert _log_tag(["/app/app_venv/bin/pyosmium-up-to-date"]) == "[PYOSMIUM-UP-TO-DATE]"
+
+
+def test_run_tags_every_line_of_valhalla_output(tmp_path, caplog, monkeypatch):
+    caplog.set_level(logging.INFO, logger="builder")
+    fake = tmp_path.joinpath("valhalla_build_tiles")
+    fake.write_text(
+        "#!/bin/sh\necho 'Parsing ways...'\necho 'Finished' >&2\n",
+        encoding="utf8",
+    )
+    fake.chmod(0o755)
+    _run([str(fake)])
+
+    messages = [record.message for record in caplog.records]
+    assert "[VALHALLA] Parsing ways..." in messages
+    assert "[VALHALLA] Finished" in messages

@@ -119,7 +119,7 @@ The app is listening on `/api/v1/jobs` for new `POST` requests to generate some 
 
 ### Logs
 
-The app exposes logs via the route `/api/v1/logs/{log_type}`. Available log types are `worker`, `app` and `builder`. The `builder` log holds the full output of `valhalla_build_tiles` and the PBF update, not just the build loop's own messages. The graph builder additionally logs to stdout, so `docker logs routing-packager-graph-build` works too. An optional query parameter `?lines={n}` limits the output to the last `n` lines. Authentication is required.
+The app exposes logs via the route `/api/v1/logs/{log_type}`. Available log types are `worker`, `app` and `builder`. The `builder` log holds the full output of `valhalla_build_tiles` and the PBF update, not just the build loop's own messages. Every line coming from a subprocess is tagged with its source — `[VALHALLA]` for all of Valhalla's binaries, `[WGET]` and `[PYOSMIUM-UP-TO-DATE]` for the others — so `grep '\[VALHALLA\]'` isolates a tile build, and `grep -v '\['` leaves the build loop's own messages. The graph builder additionally logs to stdout, so `docker logs routing-packager-graph-build` works too. An optional query parameter `?lines={n}` limits the output to the last `n` lines. Authentication is required.
 
 All three log files rotate at 10 MB and keep 10 archives, so `$TMP_DATA_DIR/logs` stays bounded. The endpoint always serves the live file.
 

@@ -39,8 +39,26 @@ def _binary(name: str) -> str:
     return shutil.which(name) or name
 
 
+def _log_tag(cmd: List[str]) -> str:
+    """
+    Builds the marker every line of a subprocess' output is prefixed with.
+
+    Valhalla's binaries all share one ``[VALHALLA]`` tag so that a whole tile build can be
+    grepped out of ``builder.log`` in one go, separate from the build loop's own messages. The
+    other tools we shell out to get their own name rather than being mislabelled.
+
+    :param cmd: the command about to run.
+    """
+    name = Path(cmd[0]).name
+    if name.startswith("valhalla_"):
+        return "[VALHALLA]"
+
+    return f"[{name.upper()}]"
+
+
 def _run(cmd: List[str], stdout: TextIO | None = None, check: bool = True) -> int:
     BUILD_LOGGER.info(f"Running {' '.join(cmd)}")
+    tag = _log_tag(cmd)
     with subprocess.Popen(
         cmd,
         stdout=stdout or subprocess.PIPE,
@@ -49,7 +67,7 @@ def _run(cmd: List[str], stdout: TextIO | None = None, check: bool = True) -> in
         bufsize=1,
     ) as process:
         for line in process.stderr if stdout else process.stdout:
-            BUILD_LOGGER.info(line.rstrip())
+            BUILD_LOGGER.info(f"{tag} {line.rstrip()}")
             BUILD_STATUS.heartbeat()
 
     if check and process.returncode != 0:
