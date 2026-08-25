@@ -1,17 +1,28 @@
 from shutil import rmtree, copytree
 
 import pytest
-from pytest_httpserver import HTTPServer
 from sqlmodel import Session, select
 
 from routing_packager_app import SETTINGS
 from routing_packager_app.api_v1.models import Job
+from routing_packager_app.graph_build.builder import swap_graph_link
+from routing_packager_app.utils.file_utils import create_lock_file
+
+GENERATION_NAME = "20260101T000000"
 
 
-# alter the default port for the HTTP test server:
-# https://pytest-httpserver.readthedocs.io/en/latest/howto.html#customizing-host-and-port
-HTTPServer.DEFAULT_LISTEN_PORT = 8002
-HTTPServer.DEFAULT_LISTEN_HOST = "localhost"
+def _reset_graph():
+    link = SETTINGS.get_graph_link()
+    if link.is_symlink():
+        link.unlink()
+    rmtree(SETTINGS.get_generations_dir(), ignore_errors=True)
+
+
+@pytest.fixture(scope="function", autouse=True)
+def clean_graph():
+    _reset_graph()
+    yield
+    _reset_graph()
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -34,8 +45,18 @@ def delete_dirs():
 
 
 @pytest.fixture(scope="function")
-def copy_valhalla_tiles():
+def empty_graph():
+    generation = SETTINGS.get_generations_dir().joinpath(GENERATION_NAME)
+    generation.mkdir(parents=True)
+    create_lock_file(generation)
+    swap_graph_link(SETTINGS.get_graph_link(), generation)
+
+    yield generation
+
+
+@pytest.fixture(scope="function")
+def copy_valhalla_tiles(empty_graph):
     for dir_ in SETTINGS.get_output_path().parent.joinpath("andorra_tiles").iterdir():
-        copytree(dir_, SETTINGS.get_valhalla_path(8002).joinpath(dir_.stem))
-    yield
-    rmtree(SETTINGS.get_valhalla_path(8002))
+        copytree(dir_, empty_graph.joinpath(dir_.stem))
+
+    yield empty_graph

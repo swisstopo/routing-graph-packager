@@ -6,7 +6,6 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from pathlib import Path
 
-from .api_v1 import api_v1_router
 from .config import SETTINGS
 
 
@@ -29,6 +28,8 @@ def create_app(lifespan: Optional[Lifespan[FastAPI]]):
 
 
 def register_router(app: FastAPI):
+    from .api_v1 import api_v1_router
+
     app.include_router(api_v1_router, prefix="/api/v1")
 
 

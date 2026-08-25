@@ -24,7 +24,6 @@ jobs:
           REDIS_URL=${{ vars.REDIS_URL }}
           ADMIN_EMAIL=${{ vars.ADMIN_EMAIL }}
           ADMIN_PASS=${{ secrets.ADMIN_PASS }}
-          VALHALLA_URL=${{ vars.VALHALLA_URL }}
           POSTGRES_DB=${{ vars.POSTGRES_DB }}
           POSTGRES_USER=${{ vars.POSTGRES_USER }}
           POSTGRES_PASS=${{ secrets.POSTGRES_PASS }}
@@ -35,6 +34,8 @@ jobs:
           USE_ELEVATION=${{ vars.USE_ELEVATION }}
           PBF_LOCAL_PATH=${{ vars.PBF_LOCAL_PATH }}
           PBF_URL=${{ vars.PBF_URL }}
+          GRAPH_BUILD_CRON=${{ vars.GRAPH_BUILD_CRON || '0 3 * * 0' }}
+          GRAPH_KEEP_GENERATIONS=${{ vars.GRAPH_KEEP_GENERATIONS || '1' }}
           HTTP_PROXY=${{ vars.HTTP_PROXY }}
           HTTPS_PROXY=${{ vars.HTTPS_PROXY }}
           NO_PROXY=${{ vars.NO_PROXY }}

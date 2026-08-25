@@ -52,11 +52,12 @@ curl --location -XPOST 'http://localhost:5000/api/v1/jobs' \
 
 After a minute you should have the graph package available in `./data/output/osm_test/`. If not, check the logs of the worker process or the Flask app.
 
-The `routing-packager-app` container running the HTTP API has a `supervisor` process running in a loop, which:
+A separate `routing-packager-graph-build` container runs on the schedule set by `GRAPH_BUILD_CRON`, and on each run:
 
 - downloads a planet PBF (if it doesn't exist) or updates the planet PBF (if it does exist)
-- builds a planet Valhalla graph
-- then updates all graph extracts with a fresh copy
+- builds a planet Valhalla graph into a fresh generation directory
+- atomically points the `graph` symlink at it
+- then queues an update of all graph extracts with a fresh copy
 
 By default, also a fake SMTP server is started, and you can see incoming messages on `http://localhost:1080`.
 
@@ -64,11 +65,34 @@ By default, also a fake SMTP server is started, and you can see incoming message
 
 ### Graph & OSM updates
 
-Under the hood we're running a `supervisor` instance to control the graph builds.
+The graph build runs in its own container on a schedule you control with `GRAPH_BUILD_CRON` (a standard 5-field cron expression, default `0 3 * * 0` — Sundays at 03:00). Because the build loop sleeps in-process until the next occurrence, two builds can never overlap, however long a planet build takes.
 
-Two instances of the [Valhalla docker image](https://github.com/gis-ops/docker-valhalla) take turns building a new graph from an updated OSM file. Those two graphs are physically separated from each other in subdirectories `$TMP_DATA_DIR/osm/8002` & `$TMP_DATA_DIR/osm/8003`.
+Before each build the planet PBF is brought up to date with [`pyosmium-up-to-date`](https://docs.osmcode.org/pyosmium/latest/tools_uptodate.html), which reads the replication server and sequence number straight from the PBF's own osmosis headers.
 
-After each graph build finished, the OSM file is updated for the next graph build.
+#### Graph generations
+
+Every build writes into a **new** directory, `$TMP_DATA_DIR/osm/generations/<timestamp>/`. Nothing is ever overwritten in place, so no packaging job can be reading a directory while it is being written. When the build succeeds, the symlink `$TMP_DATA_DIR/osm/graph` is repointed at it with a single atomic `rename(2)`. That symlink is the only source of truth for "which graph is current" — the worker resolves it when a job starts.
+
+A failed build simply leaves the symlink alone, so the previous graph keeps serving packages.
+
+Old generations are deleted at the **start** of the next build rather than the end, so anything still holding the previous generation has had a full cron interval to finish. On top of that, deletion is fenced with `flock`: the builder must be granted an exclusive lock on a generation's `.lock` file before removing it, and the worker holds a shared lock on that same file for as long as it is zipping tiles. A generation that is still being read is skipped and retried on the next build.
+
+`GRAPH_KEEP_GENERATIONS` (default `1`) controls how many generations survive pruning. With the default, a build transiently needs room for two planet graphs — the same as before.
+
+#### Relevant environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `GRAPH_BUILD_CRON` | `0 3 * * 0` | When to build, standard 5-field cron |
+| `GRAPH_KEEP_GENERATIONS` | `1` | How many graph generations to keep when pruning |
+| `PBF_URL` | planet.openstreetmap.org | Where to download the PBF from if it is missing |
+| `PBF_LOCAL_PATH` | `$TMP_DATA_DIR/planet-latest.osm.pbf` | Where the PBF lives |
+| `PBF_FORCE_UPDATE` | `false` | Pass `--force-update-of-old-planet`, needed for a very stale PBF |
+| `PBF_UPDATE_SIZE_MB` | `1024` | Max diff size applied per `pyosmium-up-to-date` pass |
+| `PBF_MAX_UPDATE_PASSES` | `10` | How many passes before giving up on catching up |
+| `USE_ELEVATION` | `false` | Build elevation into the tiles |
+| `CONCURRENCY` | `8` | Tile build threads |
+| `MAX_CACHE_SIZE` | `1000000000` | Valhalla mjolnir cache size |
 
 ### Data sources
 
@@ -92,7 +116,28 @@ The app is listening on `/api/v1/jobs` for new `POST` requests to generate some 
 
 ### Logs
 
-The app exposes logs via the route `/api/v1/logs/{log_type}`. Available log types are `worker`, `app` and `builder`. An optional query parameter `?lines={n}` limits the output to the last `n` lines. Authentication is required.
+The app exposes logs via the route `/api/v1/logs/{log_type}`. Available log types are `worker`, `app` and `builder`. The graph builder additionally logs to stdout, so `docker logs routing-packager-graph-build` works too. An optional query parameter `?lines={n}` limits the output to the last `n` lines. Authentication is required.
+
+### Health
+
+`GET /api/v1/health` reports the graph generation currently being served, read from the `build_meta.json` the builder writes into every generation:
+
+```json
+{
+  "graph": {
+    "available": true,
+    "path": "/app/tmp_data/osm/graph",
+    "generation": "20260825T030000",
+    "built_at": "2026-08-25T04:12:56.310000+00:00",
+    "pbf_path": "/app/tmp_data/planet-latest.osm.pbf",
+    "pbf_modified": "2026-08-25T03:01:44.000000+00:00",
+    "elevation": true,
+    "valhalla_version": "valhalla 3.5.1"
+  }
+}
+```
+
+`"available": false` means no graph has been built yet, or the symlink points at something unreadable. Note this replaces the previous `{"valhalla": {"8002": ..., "8003": ...}}` response, which reported on two Valhalla services that no longer run.
 
 ### Authentication and Authorization 
 

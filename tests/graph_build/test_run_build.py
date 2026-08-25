@@ -1,0 +1,118 @@
+import subprocess
+import sys
+
+import pytest
+
+from routing_packager_app.config import SETTINGS
+from routing_packager_app.graph_build import __main__ as graph_build_main
+from routing_packager_app.graph_build.builder import BuildError
+from routing_packager_app.utils.file_utils import create_lock_file
+
+HOLD_BUILD_LOCK = """
+import fcntl, os, sys, time
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_CREAT, 0o644)
+fcntl.flock(fd, fcntl.LOCK_EX)
+print("locked", flush=True)
+time.sleep(60)
+"""
+
+
+@pytest.fixture
+def build_env(tmp_path, monkeypatch):
+    monkeypatch.setattr(SETTINGS, "TMP_DATA_DIR", tmp_path)
+    pbf = tmp_path.joinpath("planet.osm.pbf")
+    pbf.write_bytes(b"")
+    monkeypatch.setattr(SETTINGS, "PBF_LOCAL_PATH", pbf)
+    monkeypatch.setattr(graph_build_main, "update_pbf", lambda _: None)
+
+    enqueued = []
+
+    async def fake_enqueue():
+        enqueued.append(True)
+
+    monkeypatch.setattr(graph_build_main, "_enqueue_package_updates", fake_enqueue)
+
+    return tmp_path, enqueued
+
+
+def fake_build_factory(name):
+    def fake_build(generations_dir, _pbf):
+        generation = generations_dir.joinpath(name)
+        generation.mkdir(parents=True)
+        create_lock_file(generation)
+        generation.joinpath("tile.gph").write_bytes(b"tile")
+
+        return generation
+
+    return fake_build
+
+
+def test_run_build_swaps_link_and_enqueues(build_env, monkeypatch):
+    _, enqueued = build_env
+    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
+
+    assert graph_build_main.run_build("osm") is True
+
+    link = SETTINGS.get_graph_link()
+    assert link.is_symlink()
+    assert link.resolve().name == "20260201T000000"
+    assert link.joinpath("build_meta.json").is_file()
+    assert enqueued == [True]
+
+
+def test_second_build_prunes_the_previous_generation(build_env, monkeypatch):
+    _, _ = build_env
+    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
+    graph_build_main.run_build("osm")
+
+    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260208T000000"))
+    graph_build_main.run_build("osm")
+
+    generations = sorted(p.name for p in SETTINGS.get_generations_dir().iterdir())
+    assert generations == ["20260201T000000", "20260208T000000"]
+
+    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260215T000000"))
+    graph_build_main.run_build("osm")
+
+    generations = sorted(p.name for p in SETTINGS.get_generations_dir().iterdir())
+    assert generations == ["20260208T000000", "20260215T000000"]
+    assert SETTINGS.get_graph_link().resolve().name == "20260215T000000"
+
+
+def test_failed_build_keeps_the_current_graph(build_env, monkeypatch):
+    _, enqueued = build_env
+    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
+    graph_build_main.run_build("osm")
+    enqueued.clear()
+
+    def failing_build(*_args):
+        raise BuildError("valhalla_build_tiles blew up")
+
+    monkeypatch.setattr(graph_build_main, "build_graph", failing_build)
+    with pytest.raises(BuildError):
+        graph_build_main.run_build("osm")
+
+    assert SETTINGS.get_graph_link().resolve().name == "20260201T000000"
+    assert enqueued == []
+
+
+def test_run_build_skips_when_another_build_holds_the_lock(build_env, monkeypatch):
+    _, enqueued = build_env
+    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
+
+    lock_path = SETTINGS.get_build_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    holder = subprocess.Popen(
+        [sys.executable, "-c", HOLD_BUILD_LOCK, str(lock_path)],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "locked"
+        assert graph_build_main.run_build("osm") is False
+    finally:
+        holder.kill()
+        holder.wait()
+
+    assert not SETTINGS.get_graph_link().is_symlink()
+    assert enqueued == []

@@ -16,6 +16,8 @@ scan*.txt
 # temp
 .env_local
 .env
+tests/tmp_data/
+tests/data/output/
 
 .vscode/
 

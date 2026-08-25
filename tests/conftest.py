@@ -11,7 +11,7 @@ from sqlmodel import Session, SQLModel
 from routing_packager_app import create_app
 from routing_packager_app.api_v1.models import APIPermission
 from routing_packager_app.config import SETTINGS
-from routing_packager_app.worker import create_package
+from routing_packager_app.worker import create_package, update_all_packages
 
 
 @asynccontextmanager
@@ -22,7 +22,7 @@ async def lifespan(app: FastAPI):
 @pytest.fixture(scope="session", autouse=True)
 def create_worker():
     """Auto-runs and creates an event loop for the worker."""
-    worker = Worker([create_package])
+    worker = Worker([create_package, update_all_packages])
     worker.async_run()
     yield
     worker.close()
@@ -98,8 +98,7 @@ def create_key_header(get_client: TestClient, basic_auth_header: dict):
 # Creates needed directories and removes them after the test function
 @pytest.fixture(scope="session", autouse=True)
 def handle_dirs():
-    paths = [SETTINGS.get_valhalla_path(p) for p in (8002, 8003)]
-    paths.append(SETTINGS.get_logging_dir())
+    paths = [SETTINGS.get_generations_dir(), SETTINGS.get_logging_dir()]
     for p in paths:
         p.mkdir(parents=True, exist_ok=True)
     yield

@@ -87,6 +87,11 @@ LOGGING_CONFIG = {
             "propagate": True,
             "qualname": "gunicorn.access",
         },
+        "builder": {
+            "level": "INFO",
+            "handlers": ["builder"],
+            "propagate": True,
+        },
     },
     "handlers": {
         "worker": {
@@ -98,6 +103,11 @@ LOGGING_CONFIG = {
             "class": "logging.FileHandler",
             "formatter": "app",
             "filename": str(SETTINGS.get_logging_dir() / "app.log"),
+        },
+        "builder": {
+            "class": "logging.FileHandler",
+            "formatter": "builder",
+            "filename": str(SETTINGS.get_logging_dir() / "builder.log"),
         },
         "default": {"class": "logging.StreamHandler", "formatter": "std", "stream": "ext://sys.stdout"},
     },
@@ -112,9 +122,15 @@ LOGGING_CONFIG = {
             "datefmt": "[%Y-%m-%d %H:%M:%S %z]",
             "class": "logging.Formatter",
         },
+        "builder": {
+            "format": "build_loop: %(asctime)s [%(process)d] [%(levelname)s] %(message)s",
+            "datefmt": "[%Y-%m-%d %H:%M:%S %z]",
+            "class": "logging.Formatter",
+        },
         "std": {"format": "%(asctime)s [%(process)d] [%(levelname)s] %(message)s"},
     },
 }
 
 config.dictConfig(LOGGING_CONFIG)
 LOGGER = logging.getLogger("worker")
+BUILD_LOGGER = logging.getLogger("builder")

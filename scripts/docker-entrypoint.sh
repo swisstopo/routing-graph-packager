@@ -2,15 +2,11 @@
 
 cmd=${1}
 
-# starts the worker
-# access valhalla server with http://app
 if [ "${cmd}" == 'worker' ]; then
-  # Start the worker
   exec /app/app_venv/bin/arq routing_packager_app.worker.WorkerSettings
-# starts the app
-# access valhalla server with http://app or http://localhost
+elif [ "${cmd}" == 'graph-build' ]; then
+  exec /app/app_venv/bin/python -m routing_packager_app.graph_build
 elif [ "${cmd}" == 'app' ]; then
-  # SSL? Provided by .docker_env with path mapped in docker-compose.yml
   opts=''
   if [ -n "${SSL_CERT}" ] && [ -n "${SSL_KEY}" ]; then
     opts="--certfile ${SSL_CERT} --keyfile ${SSL_KEY}"
@@ -19,28 +15,10 @@ elif [ "${cmd}" == 'app' ]; then
     echo "No SSL configured."
   fi
 
-  #Propagate env values for supervisord
-  CONF_FILE="/etc/supervisor/conf.d/valhalla.conf"
-  sed -i \
-    -e "s|%(ENV_MAX_CACHE_SIZE)s|${MAX_CACHE_SIZE}|g" \
-    -e "s|%(ENV_USE_ELEVATION)s|${USE_ELEVATION}|g" \
-    -e "s|%(ENV_PBF_LOCAL_PATH)s|${PBF_LOCAL_PATH}|g" \
-    -e "s|%(ENV_PBF_URL)s|${PBF_URL}|g" \
-    -e "s|%(ENV_CONCURRENCY)s|${CONCURRENCY}|g" \
-    -e "s|%(ENV_HTTP_PROXY)s|${HTTP_PROXY}|g" \
-    -e "s|%(ENV_HTTPS_PROXY)s|${HTTPS_PROXY}|g" \
-    -e "s|%(ENV_NO_PROXY)s|${NO_PROXY}|g" \
-    "$CONF_FILE"
-  
-  # make sure the log directory exists for supervisor to be able to log
   mkdir -p /app/tmp_data/logs
-  # Read the supervisor config and start the build loop
-  service supervisor start
-  supervisorctl start build_loop
 
-  # Start the gunicorn server
   . /app/app_venv/bin/activate
   exec /app/app_venv/bin/gunicorn --config gunicorn.py ${opts} main:app
 else
-  echo "Command '${cmd}' not recognized. Choose from 'worker' or 'app'"
+  echo "Command '${cmd}' not recognized. Choose from 'app', 'worker' or 'graph-build'"
 fi

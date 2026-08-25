@@ -45,25 +45,20 @@ RUN apt-get update > /dev/null && \
   export DEBIAN_FRONTEND=noninteractive && \
   apt-get install -y libluajit-5.1-dev \
   libzmq5 libgdal-dev libczmq4 spatialite-bin libprotobuf-lite32 sudo locales wget \
-  libsqlite3-0 libsqlite3-mod-spatialite libcurl4 python-is-python3 osmctools \
-  python3.12-minimal curl unzip moreutils jq spatialite-bin supervisor > /dev/null
+  libsqlite3-0 libsqlite3-mod-spatialite libcurl4 python-is-python3 \
+  python3.12-minimal curl unzip moreutils jq spatialite-bin > /dev/null
 
 WORKDIR /app
 
 ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
-# export the True defaults
-ENV use_tiles_ignore_pbf=True
-ENV build_tar=True
-ENV serve_tiles=True
 
 COPY . .
 
 COPY --from=builder /usr/local /usr/local
 COPY --from=builder /app/app_venv /app/app_venv
 COPY --from=builder /app/scripts/* /usr/local/bin/
-COPY --from=builder /app/conf/* /etc/supervisor/conf.d/
 
-# add the root cert for https://ftp5.gwdg.de/pub/misc/openstreetmap/planet.openstreetmap.org/, so osmupdate can download stuff
+# add the root cert for https://ftp5.gwdg.de/pub/misc/openstreetmap/planet.openstreetmap.org/, so the planet download works
 RUN mv /app/ssl/gwdg_root_cert.crt /usr/local/share/ca-certificates && \
   update-ca-certificates
 

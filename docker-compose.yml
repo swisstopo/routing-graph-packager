@@ -67,6 +67,22 @@ services:
     healthcheck:
       disable: true
     restart: always
+  graph-build:
+    image: ghcr.io/swisstopo/routing-graph-packager/routing-graph-packager:latest
+    container_name: routing-packager-graph-build
+    command: graph-build
+    env_file:
+      - .docker_env
+      - .env
+    networks:
+      - routing-packager
+    volumes:
+      - tmp_data:/app/tmp_data
+    depends_on:
+      - redis
+    healthcheck:
+      disable: true
+    restart: always
   app:
     image: ghcr.io/swisstopo/routing-graph-packager/routing-graph-packager:latest
     container_name: routing-packager-app

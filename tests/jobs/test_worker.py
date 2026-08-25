@@ -4,7 +4,6 @@ import shutil
 from zipfile import ZipFile
 
 import pytest
-from pytest_httpserver import HTTPServer
 from starlette.exceptions import HTTPException
 from starlette.testclient import TestClient
 
@@ -25,11 +24,7 @@ DEFAULT_ARGS = {
 
 
 @pytest.mark.asyncio
-async def test_success(
-    get_client: TestClient, httpserver: HTTPServer, basic_auth_header, copy_valhalla_tiles
-):
-    httpserver.expect_oneshot_request("/status").respond_with_json({})
-
+async def test_success(get_client: TestClient, basic_auth_header, copy_valhalla_tiles):
     # create the right bbox
     bbox = "1.486630,42.608695,1.534706,42.646334"
     args = deepcopy(DEFAULT_ARGS)
@@ -52,7 +47,7 @@ async def test_success(
 
 
 @pytest.mark.asyncio
-async def test_fail_no_valhalla(get_client: TestClient, basic_auth_header):
+async def test_fail_no_graph(get_client: TestClient, basic_auth_header):
     new_job = create_new_job(get_client, DEFAULT_ARGS, basic_auth_header)
     shutil.rmtree(Path(new_job.json()["zip_path"]).parent)
     params = create_package_params(new_job.json())
@@ -60,12 +55,11 @@ async def test_fail_no_valhalla(get_client: TestClient, basic_auth_header):
         await create_package(*params)
 
     assert e.value.status_code == 500
-    assert "No Valhalla service online" in e.value.detail
+    assert "No graph available behind" in e.value.detail
 
 
 @pytest.mark.asyncio
-async def test_fail_no_tiles_in_dir(get_client: TestClient, httpserver: HTTPServer, basic_auth_header):
-    httpserver.expect_oneshot_request("/status").respond_with_json({})
+async def test_fail_no_tiles_in_dir(get_client: TestClient, basic_auth_header, empty_graph):
     new_job = create_new_job(get_client, DEFAULT_ARGS, basic_auth_header)
     shutil.rmtree(Path(new_job.json()["zip_path"]).parent)
     params = create_package_params(new_job.json())
@@ -73,14 +67,11 @@ async def test_fail_no_tiles_in_dir(get_client: TestClient, httpserver: HTTPServ
         await create_package(*params)
 
     assert e.value.status_code == 404
-    assert "No Valhalla tiles in /" in e.value.detail
+    assert "No Valhalla tiles in" in e.value.detail
 
 
 @pytest.mark.asyncio
-async def test_fail_no_tiles_in_bbox(
-    get_client: TestClient, httpserver: HTTPServer, basic_auth_header, copy_valhalla_tiles
-):
-    httpserver.expect_oneshot_request("/status").respond_with_json({})
+async def test_fail_no_tiles_in_bbox(get_client: TestClient, basic_auth_header, copy_valhalla_tiles):
     new_job = create_new_job(get_client, DEFAULT_ARGS, basic_auth_header)
     shutil.rmtree(Path(new_job.json()["zip_path"]).parent)
     params = create_package_params(new_job.json())

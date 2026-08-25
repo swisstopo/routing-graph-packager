@@ -1,26 +1,32 @@
+import json
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBasicCredentials
-from starlette.status import HTTP_404_NOT_FOUND
-import requests
 
 from ..auth import BasicAuth, HeaderKey
 from ...config import SETTINGS
 
 router = APIRouter()
 
+
 @router.get("", response_class=JSONResponse)
 def get_health(
     auth: HTTPBasicCredentials = Depends(BasicAuth),
     key: str = Depends(HeaderKey),
 ):
-    result = {"valhalla": {"8002": HTTP_404_NOT_FOUND, "8003": HTTP_404_NOT_FOUND}}
+    link = SETTINGS.get_graph_link()
+    result = {"graph": {"available": False, "path": str(link)}}
 
-    for port in (8002, 8003):
-        try:
-            r = requests.get(f"{SETTINGS.VALHALLA_URL}:{port}/status", timeout=2)
-            result["valhalla"][str(port)] = r.status_code
-        except requests.exceptions.RequestException:
-            pass  # keep default 404 when unreachable
+    if not link.is_symlink():
+        return result
+
+    try:
+        generation = link.resolve(strict=True)
+        meta = json.loads(generation.joinpath("build_meta.json").read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return result
+
+    result["graph"] = {"available": True, "path": str(link), **meta}
 
     return result

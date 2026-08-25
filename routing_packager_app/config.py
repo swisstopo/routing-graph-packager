@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from typing import List
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings as _BaseSettings
 from pydantic_settings import SettingsConfigDict
 from starlette.datastructures import CommaSeparatedStrings
@@ -27,9 +28,20 @@ class BaseSettings(_BaseSettings):
 
     DATA_DIR: Path = BASE_DIR.joinpath("data")
     TMP_DATA_DIR: Path = BASE_DIR.joinpath("tmp_data")
-    VALHALLA_URL: str = "http://localhost"
 
     ENABLED_PROVIDERS: list[str] = list(CommaSeparatedStrings("osm"))
+
+    # GRAPH BUILD ###
+    GRAPH_BUILD_CRON: str = "0 3 * * 0"
+    GRAPH_KEEP_GENERATIONS: int = 1
+    PBF_LOCAL_PATH: Path | None = None
+    PBF_URL: str = "https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf"
+    PBF_FORCE_UPDATE: bool = False
+    PBF_MAX_UPDATE_PASSES: int = 10
+    PBF_UPDATE_SIZE_MB: int = 1024
+    USE_ELEVATION: bool = False
+    CONCURRENCY: int = 8
+    MAX_CACHE_SIZE: int = 1000000000
 
     # DATABASES ###
     POSTGRES_HOST: str = "localhost"
@@ -49,15 +61,59 @@ class BaseSettings(_BaseSettings):
 
     model_config = SettingsConfigDict(extra="ignore")
 
-    def get_valhalla_path(self, port: int) -> Path:  # pragma: no cover
+    @model_validator(mode="before")
+    @classmethod
+    def _ignore_empty_env_vars(cls, data):
         """
-        Return the path to the OSM Valhalla instances.
+        Falls back to the defaults for env vars that are set but empty.
+
+        The deploy workflows render every variable into .docker_env unconditionally, so an
+        unset GitHub variable arrives as an empty string and would otherwise either override a
+        good default or fail parsing outright.
         """
-        if port in (8002, 8003):
-            p = self.get_tmp_data_dir().joinpath(Providers.OSM.lower(), str(port))
-            p.mkdir(exist_ok=True, parents=True)
-            return p
-        raise ValueError(f"{port} is not a valid port for Valhalla.")
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if v != ""}
+
+        return data
+
+    def get_provider_dir(self, provider: str = Providers.OSM.lower()) -> Path:
+        """
+        Return the root directory holding one provider's graph generations.
+        """
+        return self.get_tmp_data_dir().joinpath(provider)
+
+    def get_graph_link(self, provider: str = Providers.OSM.lower()) -> Path:
+        """
+        Return the symlink pointing at the generation currently served to packaging jobs.
+        """
+        return self.get_provider_dir(provider).joinpath("graph")
+
+    def get_generations_dir(self, provider: str = Providers.OSM.lower()) -> Path:
+        """
+        Return the directory holding every built graph generation for a provider.
+        """
+        return self.get_provider_dir(provider).joinpath("generations")
+
+    def get_build_lock_path(self, provider: str = Providers.OSM.lower()) -> Path:
+        """
+        Return the lock file guaranteeing a single concurrent graph build.
+        """
+        return self.get_provider_dir(provider).joinpath(".build.lock")
+
+    def get_pbf_path(self) -> Path:
+        """
+        Return the local OSM PBF the graph is built from.
+        """
+        if self.PBF_LOCAL_PATH is not None:
+            return Path(self.PBF_LOCAL_PATH)
+
+        return self.get_tmp_data_dir().joinpath("planet-latest.osm.pbf")
+
+    def get_elevation_dir(self) -> Path:
+        """
+        Return the elevation tile directory, shared across all graph generations.
+        """
+        return self.get_tmp_data_dir().joinpath("elevation")
 
     def get_output_path(self) -> Path:
         return self.get_data_dir().joinpath("output")
