@@ -6,6 +6,8 @@ volumes:
       type: none
       device: $DATA_DIR # DATA_DIR is the host directory for the data. It has to be in the environment, e.g. in .env file
       o: bind
+  # graph data lives on a separate volume from 
+  # the final packages
   tmp_data: # do not change any detail of this volume
     driver: local
     driver_opts:

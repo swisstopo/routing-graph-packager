@@ -1,5 +1,6 @@
 import fcntl
 import os
+import time
 import zipfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -39,6 +40,8 @@ def make_zip(source_paths: Set[Path], parent_path: Path, out_fp: str):
 
 
 LOCK_NAME = ".lock"
+LOCK_POLL_INTERVAL = 5.0
+RESOLVE_ATTEMPTS = 2
 
 
 def create_lock_file(directory: Path) -> Path:
@@ -57,7 +60,7 @@ def create_lock_file(directory: Path) -> Path:
 
 
 @contextmanager
-def lock_generation_shared(link: Path, retries: int = 3) -> Iterator[Path]:
+def lock_generation_shared(link: Path) -> Iterator[Path]:
     """
     Resolves the graph symlink and holds a shared lock on the generation it points at.
 
@@ -65,13 +68,26 @@ def lock_generation_shared(link: Path, retries: int = 3) -> Iterator[Path]:
     an exclusive lock before deleting a generation. Holding it guarantees the resolved
     directory survives for as long as the caller reads from it.
 
+    Resolving and locking are two separate syscalls, so the generation can in principle be
+    pruned in between. That shows up in one of two ways, both recovered from by resolving the
+    symlink again, at which point it points at a generation that is current and therefore
+    never a prune candidate:
+
+      - the lock file is already gone, so opening it raises ENOENT
+      - the lock file was opened but unlinked before the lock was granted, leaving the open
+        file description pointing at an inode with no remaining links
+
+    A single re-resolve is always enough. The pruner only ever deletes generations the symlink
+    does not point at, and only at the start of a build, while the symlink is only moved at the
+    end of one. For a resolved generation to be pruned, a whole build therefore has to complete
+    between these two adjacent syscalls.
+
     :param link: the graph symlink, e.g. tmp_data/osm/graph.
-    :param retries: how often to re-resolve if the generation is pruned mid-acquisition.
 
     :returns: the resolved generation directory.
     """
     error: OSError | None = None
-    for _ in range(retries):
+    for _ in range(RESOLVE_ATTEMPTS):
         try:
             generation = link.resolve(strict=True)
             fd = os.open(generation.joinpath(LOCK_NAME), os.O_RDONLY)
@@ -95,24 +111,36 @@ def lock_generation_shared(link: Path, retries: int = 3) -> Iterator[Path]:
 
 
 @contextmanager
-def lock_exclusive(lock_path: Path, blocking: bool = False) -> Iterator[bool]:
+def lock_exclusive(lock_path: Path, timeout: float = 0.0) -> Iterator[bool]:
     """
     Takes an exclusive advisory lock on a file, creating it if needed.
 
     :param lock_path: the lock file.
-    :param blocking: whether to wait for the lock instead of giving up immediately.
+    :param timeout: how many seconds to keep retrying for. Zero means a single attempt.
 
     :returns: whether the lock was acquired.
+
+    Note that this locking mechanism works across containers sharing the same kernel
+    since flock operates on the kernel level.
     """
+    # for own sanity: make sure the directory exists
     lock_path.parent.mkdir(parents=True, exist_ok=True)
+    # maybe create the file
     fd = os.open(lock_path, os.O_RDONLY | os.O_CREAT, 0o644)
-    flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+    deadline = time.monotonic() + timeout
     try:
-        try:
-            fcntl.flock(fd, flags)
-        except OSError:
-            yield False
-            return
-        yield True
+        acquired = False
+        # keep trying until we hit the timeout
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(LOCK_POLL_INTERVAL, remaining))
+        yield acquired
     finally:
         os.close(fd)

@@ -35,6 +35,8 @@ GRAPH_BUILD_CRON=0 3 * * 0
 # How many graph generations to keep on disk. 1 means only the one currently served,
 # so a build transiently needs room for two planet graphs.
 GRAPH_KEEP_GENERATIONS=1
+# How long to wait for a running packaging job before giving up on a build, in seconds.
+GRAPH_PRUNE_TIMEOUT=3600
 
 USE_ELEVATION=false
 PBF_LOCAL_PATH=/app/tmp_data/planet-latest.osm.pbf

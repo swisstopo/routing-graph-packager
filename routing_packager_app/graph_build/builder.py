@@ -1,3 +1,14 @@
+"""
+Builds Valhalla graphs into isolated, self-contained generations.
+
+A **generation** is one graph: the complete tile set produced by a single build run, living in
+its own timestamped directory. Generations are never modified once built. A build creates a
+new one, and on success the ``graph`` symlink is moved to point at it, which is what makes it
+the one packaging jobs read from. Older generations stay on disk untouched until a later build
+prunes them. By default, no more than two generations exist on disk: one serving as the final graph,
+one being currently built.
+"""
+
 import json
 import os
 import shutil
@@ -5,7 +16,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
 from ..config import SETTINGS
 from ..logger import BUILD_LOGGER
@@ -43,42 +54,81 @@ def _valhalla_version() -> str:
         return "unknown"
 
 
-def prune_generations(generations_dir: Path, link: Path, keep: int) -> Tuple[List[Path], List[Path]]:
+def _remove_generation(generation: Path) -> Path:
+    shutil.rmtree(generation, ignore_errors=True)
+    BUILD_LOGGER.info(f"Pruned generation {generation.name}.")
+
+    return generation
+
+
+def prune_generations(generations_dir: Path, link: Path, keep: int, timeout: float = 0.0) -> List[Path]:
     """
     Deletes graph generations that are neither current nor still held by a packaging job.
 
     This is the only place tiles are ever deleted. A generation is only removed once an
-    exclusive lock on its lock file is granted, which fences it against workers holding a
+    exclusive lock on its lock file is granted, which guards it against workers holding a
     shared lock for the duration of a zip.
+
+    Pruning has to finish before the build starts, because the build writes one more tile set
+    to disk. Skipping a locked generation and building anyway would leave `keep + 2` tile sets
+    where there is only room for `keep + 1`, so a held generation is waited on for up to
+    `timeout` seconds and the build is aborted if it is still held after that. Aborting keeps
+    the current graph in place and the next scheduled run tries again.
 
     :param generations_dir: the directory holding every built generation.
     :param link: the graph symlink, whose target is never pruned.
     :param keep: how many generations to retain, the current one included.
+    :param timeout: how many seconds to wait for a generation held by a packaging job.
 
-    :returns: the pruned and the skipped generation directories.
+    :returns: the pruned generation directories.
     """
-    if not generations_dir.is_dir():
-        return [], []
 
+    # if the passed directory does not exist, there is nothing to do
+    if not generations_dir.is_dir():
+        return []
+
+    # try to follow the symlink to the current directory inside
+    # the generations dir
     current = link.resolve() if link.is_symlink() else None
+
+    # list all the graph builds that are not serving as the current one used
+    # in packaging
+    # names are timestamps, so reverse order means newest to oldest
     others = sorted((p for p in generations_dir.iterdir() if p.is_dir() and p != current), reverse=True)
+    # retain the <keep> newest ones
     retained = set(others[: max(keep - 1, 0)])
 
     pruned: List[Path] = []
-    skipped: List[Path] = []
     for generation in others:
         if generation in retained:
             continue
-        with lock_exclusive(generation.joinpath(LOCK_NAME)) as acquired:
-            if not acquired:
-                BUILD_LOGGER.info(f"Generation {generation.name} is held by a reader, skipping prune.")
-                skipped.append(generation)
-                continue
-            shutil.rmtree(generation, ignore_errors=True)
-            BUILD_LOGGER.info(f"Pruned generation {generation.name}.")
-            pruned.append(generation)
 
-    return pruned, skipped
+        lock_path = generation.joinpath(LOCK_NAME)
+        # try to prune
+        with lock_exclusive(lock_path) as acquired:
+            if acquired:
+                pruned.append(_remove_generation(generation))
+                continue
+
+        # if we get here acquiring the lock failed and we'll
+        # patiently try again for timeout seconds
+        BUILD_LOGGER.info(
+            f"Generation {generation.name} is held by a packaging job, waiting up to "
+            f"{timeout:.0f}s before starting the build."
+        )
+        with lock_exclusive(lock_path, timeout) as acquired:
+            # the default timeout of one hour will rarely be
+            # exceeded... _maybe_ if the registered packages stack
+            # up over time
+            if not acquired:
+                raise BuildError(
+                    f"Generation {generation.name} is still held by a packaging job after "
+                    f"{timeout:.0f}s. Aborting so that no more than {keep + 1} tile sets end up "
+                    "on disk."
+                )
+            pruned.append(_remove_generation(generation))
+
+    return pruned
 
 
 def download_pbf(pbf: Path) -> None:
@@ -101,6 +151,9 @@ def update_pbf(pbf: Path) -> None:
     that needs another pass, which is what the loop below is for.
 
     :param pbf: the PBF to update in place.
+
+    Note that pyosmium does not expose this functionality conveniently via the library, so we
+    have to use subprocess.
     """
     cmd = [
         _binary("pyosmium-up-to-date"),
@@ -185,7 +238,7 @@ def build_graph(generations_dir: Path, pbf: Path) -> Path:
     if SETTINGS.USE_ELEVATION:
         _run([
             _binary("valhalla_build_elevation"),
-            "--from-tiles",
+            "--from-tiles",  # makes sure we only download the elevation tiles we need
             "--decompress",
             "-c",
             str(config_path),
@@ -243,10 +296,14 @@ def swap_graph_link(link: Path, generation: Path) -> None:
     :param link: the graph symlink.
     :param generation: the generation it should point at.
     """
+    # make sure the directory exists
     link.parent.mkdir(parents=True, exist_ok=True)
     staged = link.with_name(link.name + ".tmp")
+
+    # dangling symlink, just remove it
     if staged.is_symlink() or staged.exists():
         staged.unlink()
+
     staged.symlink_to(generation)
     os.replace(staged, link)
     BUILD_LOGGER.info(f"{link} now points at {generation.name}.")

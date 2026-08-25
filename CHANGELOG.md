@@ -11,6 +11,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Fixed
 -
 ### Changed
--
+ - split the graph build into separate container, controlled via cron
 ### Deprecated
 -

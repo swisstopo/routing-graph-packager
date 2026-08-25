@@ -51,7 +51,7 @@ def test_run_build_swaps_link_and_enqueues(build_env, monkeypatch):
     _, enqueued = build_env
     monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
 
-    assert graph_build_main.run_build("osm") is True
+    graph_build_main.run_build("osm")
 
     link = SETTINGS.get_graph_link()
     assert link.is_symlink()
@@ -109,7 +109,7 @@ def test_run_build_skips_when_another_build_holds_the_lock(build_env, monkeypatc
     )
     try:
         assert holder.stdout.readline().strip() == "locked"
-        assert graph_build_main.run_build("osm") is False
+        graph_build_main.run_build("osm")
     finally:
         holder.kill()
         holder.wait()

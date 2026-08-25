@@ -43,6 +43,10 @@ def _sleep_until(when: datetime) -> None:
 
 
 async def _enqueue_package_updates() -> None:
+    """
+    After a graph build finishes, recreate existing packages with the
+    new graph data.
+    """
     pool = await create_pool(RedisSettings.from_dsn(SETTINGS.REDIS_URL))
     try:
         await pool.enqueue_job("update_all_packages")
@@ -51,25 +55,30 @@ async def _enqueue_package_updates() -> None:
         await (getattr(pool, "aclose", None) or pool.close)()
 
 
-def run_build(provider: str) -> bool:
+def run_build(provider: str) -> None:
     """
     Runs one full build: prune, update the PBF, build a generation and swap it in.
 
     :param provider: the dataset provider to build for.
-
-    :returns: whether a build actually ran.
     """
     link = SETTINGS.get_graph_link(provider)
     generations_dir = SETTINGS.get_generations_dir(provider)
     generations_dir.mkdir(parents=True, exist_ok=True)
     pbf = SETTINGS.get_pbf_path()
 
+    # get a lock on the build directory, making sure there isn't another
+    # graph build going on currently
     with lock_exclusive(SETTINGS.get_build_lock_path(provider)) as acquired:
         if not acquired:
             BUILD_LOGGER.warning("Another graph build holds the build lock, skipping this run.")
-            return False
+            return
 
-        prune_generations(generations_dir, link, SETTINGS.GRAPH_KEEP_GENERATIONS)
+        prune_generations(
+            generations_dir,
+            link,
+            SETTINGS.GRAPH_KEEP_GENERATIONS,
+            SETTINGS.GRAPH_PRUNE_TIMEOUT,
+        )
 
         if not pbf.is_file():
             download_pbf(pbf)
@@ -80,9 +89,9 @@ def run_build(provider: str) -> bool:
         write_build_meta(generation, pbf)
         swap_graph_link(link, generation)
 
+    # the build ran, so its time to re-create
+    # existing packages with the new data
     asyncio.run(_enqueue_package_updates())
-
-    return True
 
 
 def main() -> int:
@@ -106,6 +115,12 @@ def main() -> int:
     else:
         _sleep_until(croniter(SETTINGS.GRAPH_BUILD_CRON, datetime.now(timezone.utc)).get_next(datetime))
 
+    # keep trying to run a single build
+    # this while loop just tries to acquire an exclusive lock on
+    # the build directory to make sure there is not another graph
+    # build going on.
+    # the global _stop is used to handle incoming signals to be able to
+    # terminate manually
     while not _stop:
         try:
             run_build(provider)

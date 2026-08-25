@@ -75,7 +75,9 @@ Every build writes into a **new** directory, `$TMP_DATA_DIR/osm/generations/<tim
 
 A failed build simply leaves the symlink alone, so the previous graph keeps serving packages.
 
-Old generations are deleted at the **start** of the next build rather than the end, so anything still holding the previous generation has had a full cron interval to finish. On top of that, deletion is fenced with `flock`: the builder must be granted an exclusive lock on a generation's `.lock` file before removing it, and the worker holds a shared lock on that same file for as long as it is zipping tiles. A generation that is still being read is skipped and retried on the next build.
+Old generations are deleted at the **start** of the next build rather than the end, so anything still holding the previous generation has had a full cron interval to finish. On top of that, deletion is fenced with `flock`: the builder must be granted an exclusive lock on a generation's `.lock` file before removing it, and the worker holds a shared lock on that same file for as long as it is zipping tiles.
+
+Pruning has to finish *before* the build starts, since the build itself adds one more tile set to disk. If a generation is still being packaged, the builder waits up to `GRAPH_PRUNE_TIMEOUT` seconds for that job to finish. If it is still held after that, the build is aborted rather than started — starting it would put one more tile set on disk than there is room for. An aborted build leaves the current graph serving and the next scheduled run tries again.
 
 `GRAPH_KEEP_GENERATIONS` (default `1`) controls how many generations survive pruning. With the default, a build transiently needs room for two planet graphs — the same as before.
 
@@ -85,6 +87,7 @@ Old generations are deleted at the **start** of the next build rather than the e
 |---|---|---|
 | `GRAPH_BUILD_CRON` | `0 3 * * 0` | When to build, standard 5-field cron |
 | `GRAPH_KEEP_GENERATIONS` | `1` | How many graph generations to keep when pruning |
+| `GRAPH_PRUNE_TIMEOUT` | `3600` | Seconds to wait for a packaging job before aborting the build |
 | `PBF_URL` | planet.openstreetmap.org | Where to download the PBF from if it is missing |
 | `PBF_LOCAL_PATH` | `$TMP_DATA_DIR/planet-latest.osm.pbf` | Where the PBF lives |
 | `PBF_FORCE_UPDATE` | `false` | Pass `--force-update-of-old-planet`, needed for a very stale PBF |

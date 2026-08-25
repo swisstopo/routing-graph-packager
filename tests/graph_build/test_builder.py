@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import threading
 
 import pytest
 
@@ -88,10 +89,9 @@ def test_prune_keeps_current_generation(graph_dirs):
     current = make_generation(generations, "20260108T000000")
     swap_graph_link(link, current)
 
-    pruned, skipped = prune_generations(generations, link, keep=1)
+    pruned = prune_generations(generations, link, keep=1)
 
     assert pruned == [old]
-    assert skipped == []
     assert not old.exists()
     assert current.is_dir()
 
@@ -103,14 +103,14 @@ def test_prune_retains_extra_generations(graph_dirs):
     current = make_generation(generations, "20260115T000000")
     swap_graph_link(link, current)
 
-    pruned, _ = prune_generations(generations, link, keep=2)
+    pruned = prune_generations(generations, link, keep=2)
 
     assert pruned == [oldest]
     assert previous.is_dir()
     assert current.is_dir()
 
 
-def test_prune_skips_generation_held_by_a_reader(graph_dirs):
+def test_prune_aborts_the_build_when_a_generation_stays_held(graph_dirs):
     generations, link = graph_dirs
     old = make_generation(generations, "20260101T000000")
     current = make_generation(generations, "20260108T000000")
@@ -118,16 +118,33 @@ def test_prune_skips_generation_held_by_a_reader(graph_dirs):
 
     holder = hold_shared_lock(old.joinpath(LOCK_NAME))
     try:
-        pruned, skipped = prune_generations(generations, link, keep=1)
+        with pytest.raises(BuildError, match="still held by a packaging job"):
+            prune_generations(generations, link, keep=1, timeout=0.2)
     finally:
         holder.kill()
         holder.wait()
 
-    assert pruned == []
-    assert skipped == [old]
     assert old.is_dir()
+    assert current.is_dir()
 
-    pruned, skipped = prune_generations(generations, link, keep=1)
+    assert prune_generations(generations, link, keep=1) == [old]
+    assert not old.exists()
+
+
+def test_prune_waits_for_a_reader_to_finish(graph_dirs, monkeypatch):
+    monkeypatch.setattr("routing_packager_app.utils.file_utils.LOCK_POLL_INTERVAL", 0.05)
+    generations, link = graph_dirs
+    old = make_generation(generations, "20260101T000000")
+    current = make_generation(generations, "20260108T000000")
+    swap_graph_link(link, current)
+
+    holder = hold_shared_lock(old.joinpath(LOCK_NAME))
+    threading.Timer(0.3, holder.kill).start()
+    try:
+        pruned = prune_generations(generations, link, keep=1, timeout=30)
+    finally:
+        holder.wait()
+
     assert pruned == [old]
     assert not old.exists()
 

@@ -6,9 +6,9 @@ We :heart: patches, fixes & feature PRs and want to make sure everything goes sm
 
 For development we use:
 
-- [`poetry`](https://github.com/python-poetry/poetry/) as package manager
+- [`uv`](https://github.com/python-poetry/poetry/) as package manager
 - `pytest` for testing
-- [`black`](https://github.com/psf/black) to make sure the formatting is consistent.
+- [`ruff`](https://github.com/psf/black) to make sure the formatting is consistent.
 - [`ruff`](https://github.com/astral-sh/ruff) for linting
 - [`pre-commit`](https://pre-commit.com) hook for formatting and linting
 

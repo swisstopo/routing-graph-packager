@@ -34,6 +34,7 @@ class BaseSettings(_BaseSettings):
     # GRAPH BUILD ###
     GRAPH_BUILD_CRON: str = "0 3 * * 0"
     GRAPH_KEEP_GENERATIONS: int = 1
+    GRAPH_PRUNE_TIMEOUT: int = 3600
     PBF_LOCAL_PATH: Path | None = None
     PBF_URL: str = "https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf"
     PBF_FORCE_UPDATE: bool = False
