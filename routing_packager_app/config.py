@@ -29,10 +29,10 @@ class BaseSettings(_BaseSettings):
     TMP_DATA_DIR: Path = BASE_DIR.joinpath("tmp_data")
     VALHALLA_URL: str = "http://localhost"
 
-    ENABLED_PROVIDERS: list[str] = list(CommaSeparatedStrings("osm"))
+    ENABLED_PROVIDERS: list[str] = list(CommaSeparatedStrings("osm,tomtom"))
 
     # DATABASES ###
-    POSTGRES_HOST: str = "localhost"
+    POSTGRES_HOST: str = "postgis"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "gis"
     POSTGRES_USER: str = "docker"
