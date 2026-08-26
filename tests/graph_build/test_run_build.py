@@ -8,7 +8,7 @@ from routing_packager_app.constants import BuildOutcome
 from routing_packager_app.db import lock_engine
 from routing_packager_app.graph_build import __main__ as graph_build_main
 from routing_packager_app.graph_build.builder import BuildError
-from routing_packager_app.graph_build.status import BUILD_STATUS, BuildStatus
+from routing_packager_app.graph_build.status import BUILD_STATUS, EXTERNAL_SCHEDULE, BuildStatus
 from routing_packager_app.utils.lock_utils import build_lock_name, lock_key
 
 
@@ -158,16 +158,15 @@ def test_once_ignores_the_cron_expression(build_env, monkeypatch):
     monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
 
     assert graph_build_main.main(["--once"]) == graph_build_main.EXIT_OK
-    assert json.loads(BUILD_STATUS.path.read_text())["next_build_at"] is None
 
 
-def test_once_reports_the_next_build_when_the_cron_is_set(build_env, monkeypatch):
+def test_once_never_guesses_the_next_build(build_env, monkeypatch):
     monkeypatch.setattr(SETTINGS, "GRAPH_BUILD_CRON", "0 3 * * 0")
     monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
 
     graph_build_main.main(["--once"])
 
-    assert json.loads(BUILD_STATUS.path.read_text())["next_build_at"] is not None
+    assert json.loads(BUILD_STATUS.path.read_text())["next_build_at"] == EXTERNAL_SCHEDULE
 
 
 def test_once_fails_with_an_exit_code(build_env, monkeypatch):

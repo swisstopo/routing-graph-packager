@@ -81,19 +81,17 @@ Old generations are deleted at the **start** of the next build rather than the e
 
 The locks live in Postgres rather than on the filesystem so that the builder does not have to share a machine with the workers.
 
-Pruning has to finish *before* the build starts, since the build itself adds one more tile set to disk. If a generation is still being packaged, the builder waits up to `GRAPH_PRUNE_TIMEOUT` seconds for that job to finish. If it is still held after that, the build is aborted rather than started — starting it would put one more tile set on disk than there is room for. An aborted build leaves the current graph serving and the next scheduled run tries again.
-
-`GRAPH_KEEP_GENERATIONS` (default `1`) controls how many generations survive pruning. With the default, a build transiently needs room for two planet graphs — the same as before.
+Pruning has to finish *before* the build starts, since the build itself adds one more tile set to disk. If a generation is still being packaged, the builder waits up to `GRAPH_PRUNE_TIMEOUT` seconds for that job to finish. If it is still held after that, the build is aborted. An aborted build leaves the current graph serving and the next scheduled run tries again.
 
 #### Running the build from an external scheduler
 
-The builder normally loops in-process on `GRAPH_BUILD_CRON`, which is what the docker compose deployment wants. Where something else owns the schedule — a Kubernetes `CronJob`, systemd timer, Nomad periodic job — pass `--once` instead and the container builds exactly one graph and exits:
+The builder normally loops in-process on `GRAPH_BUILD_CRON`, which is what the docker compose deployment wants. Where something else owns the schedule, e.g. a Kubernetes `CronJob`, simply pass `--once` instead and the container builds exactly one graph and exits:
 
 ```yaml
 args: ["graph-build", "--once"]
 ```
 
-`GRAPH_BUILD_CRON` is not read in this mode, and does not need to be valid. Keeping it set to mirror the external schedule is still worthwhile: it is the only thing that fills `build.next_build_at` in the health report.
+`GRAPH_BUILD_CRON` is not read in this mode, and does not need to be valid. The builder has no way of knowing what the external scheduler was configured with, so it does not guess: `build.next_build_at` in the health report reads `externally_controlled` instead of a timestamp.
 
 | Exit code | Meaning |
 |---|---|
@@ -205,7 +203,7 @@ Read from `$TMP_DATA_DIR/<provider>/build_status.json`, which the graph build co
 | `stage` | while building: `pruning`, `downloading_pbf`, `updating_pbf`, `building_tiles`, `building_elevation`, `enhancing_tiles` or `swapping` |
 | `generation` | the directory the running build writes into, which is not yet the one being served |
 | `updated_at` | when the builder was last heard from, refreshed at most every 10s while a build runs |
-| `next_build_at` | the next `GRAPH_BUILD_CRON` occurrence, set while idle |
+| `next_build_at` | while idle: the next `GRAPH_BUILD_CRON` occurrence, or `externally_controlled` when the builder runs with `--once` and something else owns the schedule |
 | `last_error` | why the last build gave up, kept alongside the `stage` it died on |
 
 A failed build does not affect `graph.available`: the previously built generation is still there and still serveable.

@@ -19,6 +19,7 @@ from ..config import SETTINGS
 from ..constants import BuildStage, BuildState
 
 HEARTBEAT_INTERVAL = 10.0
+EXTERNAL_SCHEDULE = "externally_controlled"
 
 
 def _now() -> str:
@@ -76,15 +77,20 @@ class BuildStatus:
             return
         self._write()
 
-    def idle(self, next_build_at: datetime | None = None) -> None:
+    def idle(self, next_build_at: datetime | str | None = None) -> None:
         """
         Records that no build is running.
 
-        :param next_build_at: when the next cron occurrence is due, if it is known.
+        :param next_build_at: when the next build is due. A datetime where this process owns the
+            schedule, :data:`EXTERNAL_SCHEDULE` where something outside it does, and ``None`` where
+            it is simply unknown.
         """
+        if isinstance(next_build_at, datetime):
+            next_build_at = next_build_at.isoformat()
+
         self._data["state"] = BuildState.IDLE.value
         self._data["stage"] = None
-        self._data["next_build_at"] = next_build_at.isoformat() if next_build_at else None
+        self._data["next_build_at"] = next_build_at
         self._write()
 
     def failed(self, error: str) -> None:

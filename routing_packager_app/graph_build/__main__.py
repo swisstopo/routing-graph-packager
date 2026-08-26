@@ -14,7 +14,7 @@ from ..config import SETTINGS
 from ..constants import BuildOutcome, Providers
 from ..logger import BUILD_LOGGER
 from ..utils.lock_utils import build_lock_name, lock_exclusive
-from .status import BUILD_STATUS
+from .status import BUILD_STATUS, EXTERNAL_SCHEDULE
 from .builder import (
     BuildError,
     build_graph,
@@ -44,20 +44,6 @@ def _handle_signal(signum, _frame) -> None:
 
 def _next_build_at() -> datetime:
     return croniter(SETTINGS.GRAPH_BUILD_CRON, datetime.now(timezone.utc)).get_next(datetime)
-
-
-def _next_build_at_or_none() -> datetime | None:
-    """
-    The next cron occurrence, where an external scheduler may own the schedule instead.
-
-    A one-shot build does not need ``GRAPH_BUILD_CRON`` to be set or valid, so the field it feeds
-    in the health report is the one thing that degrades: it stays empty unless the operator
-    mirrors the external schedule into the variable.
-    """
-    if not croniter.is_valid(SETTINGS.GRAPH_BUILD_CRON):
-        return None
-
-    return _next_build_at()
 
 
 def _sleep_until(when: datetime) -> None:
@@ -156,7 +142,7 @@ def run_once(provider: str) -> int:
     if outcome is BuildOutcome.SKIPPED:
         return EXIT_LOCKED
 
-    BUILD_STATUS.idle(_next_build_at_or_none())
+    BUILD_STATUS.idle(EXTERNAL_SCHEDULE)
 
     return EXIT_OK
 
