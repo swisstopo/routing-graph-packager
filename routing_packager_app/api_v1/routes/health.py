@@ -1,5 +1,4 @@
 import json
-from datetime import datetime, timezone
 from hmac import compare_digest
 from typing import Any, Dict
 
@@ -20,7 +19,7 @@ from ..models import APIKeys, APIPermission, User
 
 router = APIRouter()
 
-STALE_AFTER = 120.0
+# uses the default health key directly from arq
 WORKER_HEALTH_KEY = default_queue_name + health_check_key_suffix
 
 
@@ -28,9 +27,9 @@ def _is_admin(auth: HTTPBasicCredentials | None) -> bool:
     """
     Checks the basic auth credentials against the configured admin without touching the database.
 
-    ``User.add_admin_user`` seeds the admin row from these same two settings at startup, so this
-    is not a separate credential. It exists so that the endpoint can still answer, and report
-    Postgres as down, when Postgres is the thing that is broken.
+    ``User.add_admin_user`` seeds the admin from the environment at startup.
+    It exists so that the endpoint can still answer, and report
+    the database as down.
 
     :param auth: the decoded basic auth header, if one was sent.
     """
@@ -50,6 +49,9 @@ def _authenticate(db: Session, auth: HTTPBasicCredentials | None, key: str) -> b
     :param auth: the decoded basic auth header, if one was sent.
     :param key: the x-api-key header's value, if one was sent.
     """
+
+    # first check via user/pw combination
+    # in order to still report health when the DB is down
     if _is_admin(auth):
         return True
 
@@ -76,38 +78,19 @@ def _graph_report() -> Dict[str, Any]:
 
 
 def _build_report() -> Dict[str, Any]:
+    """
+    Report on the graph build.
+    """
     try:
-        report = json.loads(SETTINGS.get_build_status_path().read_text(encoding="utf8"))
+        return json.loads(SETTINGS.get_build_status_path().read_text(encoding="utf8"))
     except (OSError, ValueError):
-        return {"state": BuildState.UNKNOWN.value, "stale": False}
-
-    report["stale"] = _is_stale(report)
-
-    return report
-
-
-def _is_stale(report: Dict[str, Any]) -> bool:
-    """
-    Decides whether a build that claims to be running still is.
-
-    The builder refreshes ``updated_at`` while it works, so a running build is never more than a
-    few heartbeats old. A container killed mid-build leaves its last stage behind forever, which
-    is what this catches.
-
-    :param report: the parsed build status file.
-    """
-    if report.get("state") != BuildState.BUILDING.value:
-        return False
-
-    try:
-        updated_at = datetime.fromisoformat(report["updated_at"])
-    except (KeyError, TypeError, ValueError):
-        return True
-
-    return (datetime.now(timezone.utc) - updated_at).total_seconds() > STALE_AFTER
+        return {"state": BuildState.UNKNOWN.value}
 
 
 def _postgres_report(db: Session) -> Dict[str, Any]:
+    """
+    Minimal postgres smoke test.
+    """
     try:
         db.execute(text("SELECT 1"))
     except Exception as e:
@@ -120,14 +103,17 @@ def _parse_worker_health(raw: bytes) -> Dict[str, Any]:
     """
     Pulls the counters out of the health check string ARQ's worker writes.
 
-    The value looks like ``Aug-25 11:41:20 j_complete=0 j_failed=0 j_retried=0 j_ongoing=0
-    queued=0``. Its timestamp carries neither a year nor a zone, so it is reported verbatim
-    rather than parsed - the key's presence already answers whether the worker is alive, since
-    the worker sets it with a TTL.
+    The value looks like this:
+
+        ``Aug-25 11:41:20 j_complete=0 j_failed=0 j_retried=0 j_ongoing=0
+    queued=0``
 
     :param raw: the health check key's value.
     """
+    # split into tokens by space
     fields = raw.decode(errors="replace").split()
+
+    # get the counter values
     counters = dict(field.split("=", 1) for field in fields if "=" in field)
 
     def number(name: str) -> int | None:
@@ -137,6 +123,8 @@ def _parse_worker_health(raw: bytes) -> Dict[str, Any]:
             return None
 
     return {
+        # TODO: the date and time format might be an implementation detail
+        # that could change underneath our feet in the future
         "last_report": " ".join(field for field in fields if "=" not in field) or None,
         "ongoing": number("j_ongoing"),
         "complete": number("j_complete"),
@@ -146,6 +134,9 @@ def _parse_worker_health(raw: bytes) -> Dict[str, Any]:
 
 
 async def _services_report(db: Session, pool: ArqRedis | None) -> Dict[str, Any]:
+    """
+    Report health of redis and postgres
+    """
     worker: Dict[str, Any] = {
         "up": False,
         "last_report": None,
@@ -169,6 +160,9 @@ async def _services_report(db: Session, pool: ArqRedis | None) -> Dict[str, Any]
 
     try:
         raw = await pool.get(WORKER_HEALTH_KEY)
+        # zcard is a standard redis command
+        # that reports the number of members in a sorted
+        # set
         worker["queued"] = await pool.zcard(default_queue_name)
         if raw:
             worker.update(_parse_worker_health(raw), up=True)

@@ -5,8 +5,8 @@ The builder runs in its own container, so the API app cannot ask it anything dir
 every stage transition is written atomically to ``build_status.json`` next to the ``graph``
 symlink, where ``/api/v1/health`` reads it.
 
-Long stages additionally refresh ``updated_at`` as a heartbeat, which is what lets a reader tell
-a build that is still working from one whose container was killed mid-run.
+Long stages additionally refresh ``updated_at``, so a reader can see when the builder was last
+heard from rather than only when the current stage started.
 """
 
 import json

@@ -103,7 +103,9 @@ class BaseSettings(_BaseSettings):
 
     def get_build_status_path(self, provider: str = Providers.OSM.lower()) -> Path:
         """
-        Return the file the graph builder publishes its current stage to.
+        Return the file the graph builder publishes its current stage to. It's
+        a small JSON file that the graph builder continuously updates, which
+        serves as a way to let the API report on the builder's status.
         """
         return self.get_provider_dir(provider).joinpath("build_status.json")
 

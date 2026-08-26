@@ -146,7 +146,6 @@ All three log files rotate at 10 MB and keep 10 archives, so `$TMP_DATA_DIR/logs
     "generation": "20260825T113047",
     "started_at": "2026-08-25T11:30:47+00:00",
     "updated_at": "2026-08-25T11:42:03+00:00",
-    "stale": false,
     "next_build_at": null,
     "last_error": null
   },
@@ -181,12 +180,11 @@ Read from `$TMP_DATA_DIR/<provider>/build_status.json`, which the graph build co
 | `state` | `idle`, `building`, `failed`, or `unknown` before the builder has ever run |
 | `stage` | while building: `pruning`, `downloading_pbf`, `updating_pbf`, `building_tiles`, `building_elevation`, `enhancing_tiles` or `swapping` |
 | `generation` | the directory the running build writes into, which is not yet the one being served |
-| `updated_at` | refreshed continuously while a build runs, so it doubles as a heartbeat |
-| `stale` | `true` when `state` is `building` but the heartbeat stopped — the build container died mid-run |
+| `updated_at` | when the builder was last heard from, refreshed at most every 10s while a build runs |
 | `next_build_at` | the next `GRAPH_BUILD_CRON` occurrence, set while idle |
 | `last_error` | why the last build gave up, kept alongside the `stage` it died on |
 
-A stale or failed build does not affect `graph.available`: the previously built generation is still there and still serveable.
+A failed build does not affect `graph.available`: the previously built generation is still there and still serveable.
 
 #### `services`
 

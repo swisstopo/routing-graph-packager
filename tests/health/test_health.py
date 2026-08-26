@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
@@ -55,7 +55,6 @@ def test_reports_an_unknown_build_without_a_status_file(get_client: TestClient, 
     res = get_client.get("/api/v1/health", headers=basic_auth_header).json()
 
     assert res["build"]["state"] == "unknown"
-    assert res["build"]["stale"] is False
 
 
 def test_reports_the_next_build(get_client: TestClient, basic_auth_header: dict, write_status):
@@ -64,7 +63,6 @@ def test_reports_the_next_build(get_client: TestClient, basic_auth_header: dict,
 
     assert res["build"]["state"] == "idle"
     assert res["build"]["next_build_at"] == "2026-09-01T03:00:00+00:00"
-    assert res["build"]["stale"] is False
 
 
 def test_reports_a_running_build(get_client: TestClient, basic_auth_header: dict, write_status):
@@ -78,20 +76,6 @@ def test_reports_a_running_build(get_client: TestClient, basic_auth_header: dict
 
     assert res["build"]["stage"] == "building_tiles"
     assert res["build"]["generation"] == "20260825T113047"
-    assert res["build"]["stale"] is False
-
-
-def test_flags_a_build_whose_heartbeat_stopped(
-    get_client: TestClient, basic_auth_header: dict, write_status
-):
-    write_status(
-        state="building",
-        stage="building_tiles",
-        updated_at=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
-    )
-    res = get_client.get("/api/v1/health", headers=basic_auth_header).json()
-
-    assert res["build"]["stale"] is True
 
 
 def test_reports_a_failed_build(get_client: TestClient, basic_auth_header: dict, write_status):
@@ -100,7 +84,6 @@ def test_reports_a_failed_build(get_client: TestClient, basic_auth_header: dict,
 
     assert res["build"]["state"] == "failed"
     assert res["build"]["last_error"] == "boom"
-    assert res["build"]["stale"] is False
 
 
 def test_reports_postgres_up(get_client: TestClient, basic_auth_header: dict):
