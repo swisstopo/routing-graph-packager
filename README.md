@@ -81,6 +81,31 @@ Pruning has to finish *before* the build starts, since the build itself adds one
 
 `GRAPH_KEEP_GENERATIONS` (default `1`) controls how many generations survive pruning. With the default, a build transiently needs room for two planet graphs — the same as before.
 
+#### Running the build from an external scheduler
+
+The builder normally loops in-process on `GRAPH_BUILD_CRON`, which is what the docker compose deployment wants. Where something else owns the schedule — a Kubernetes `CronJob`, systemd timer, Nomad periodic job — pass `--once` instead and the container builds exactly one graph and exits:
+
+```yaml
+args: ["graph-build", "--once"]
+```
+
+`GRAPH_BUILD_CRON` is not read in this mode, and does not need to be valid. Keeping it set to mirror the external schedule is still worthwhile: it is the only thing that fills `build.next_build_at` in the health report.
+
+| Exit code | Meaning |
+|---|---|
+| `0` | The graph was built and the symlink swapped |
+| `1` | The build failed; the previous graph keeps serving |
+| `75` | Another build held the build lock, so this run did nothing |
+
+Because 75 is non-zero, a scheduler that retries on failure will retry a run that was merely superfluous. Under Kubernetes, pair `--once` with `concurrencyPolicy: Forbid` and a low `backoffLimit`.
+
+Two more things matter once the builder is a short-lived job:
+
+- **Keep the builder and the workers on one node.** Everything that stops a packaging job from reading tiles that are being deleted is an advisory `flock` on a file in `$TMP_DATA_DIR`, which is coordinated by the kernel the two processes share. Co-locate them — a single node pool, or `nodeAffinity` plus an RWO volume — and it works exactly as it does under docker compose. Spreading them across nodes against an RWX volume makes the fence depend on the storage driver honouring `flock` over the network, which not all of them do, and the failure mode is a generation deleted underneath a running job. The graph is a large local disk anyway, so co-location is rarely a real constraint. The HTTP app takes no locks — it only reads the symlink, the build status and the logs — so it is free to run anywhere the volumes can be mounted, and it is the only component that scales to several replicas without further thought.
+- **Give the pod time to shut down.** `SIGTERM` is forwarded to the running Valhalla process, which then exits non-zero and fails the build cleanly, recording the reason in the status file. That takes longer than the default 30s grace period on a planet build, so raise `terminationGracePeriodSeconds` and set `activeDeadlineSeconds` well above a full build.
+
+A build whose container is killed outright leaves the status file reading `building`. The next build recognises it — it can only take the build lock if nobody else is building — and records it as failed before starting. In between, the scheduler's own job status is the authority.
+
 #### Relevant environment variables
 
 | Variable | Default | Description |

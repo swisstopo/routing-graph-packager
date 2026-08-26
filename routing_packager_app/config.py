@@ -32,7 +32,7 @@ class BaseSettings(_BaseSettings):
     ENABLED_PROVIDERS: list[str] = list(CommaSeparatedStrings("osm"))
 
     # GRAPH BUILD ###
-    GRAPH_BUILD_CRON: str = "0 3 * * 0"
+    GRAPH_BUILD_CRON: str = "0 3 * * 0"  # 03:00 AM every Sunday
     GRAPH_KEEP_GENERATIONS: int = 1
     GRAPH_PRUNE_TIMEOUT: int = 3600
     PBF_LOCAL_PATH: Path | None = None

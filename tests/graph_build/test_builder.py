@@ -294,3 +294,23 @@ def test_run_tags_every_line_of_valhalla_output(tmp_path, caplog, monkeypatch):
     messages = [record.message for record in caplog.records]
     assert "[VALHALLA] Parsing ways..." in messages
     assert "[VALHALLA] Finished" in messages
+
+
+def test_terminate_current_without_a_child_is_a_no_op():
+    builder.terminate_current()
+
+
+def test_terminate_current_stops_a_running_build(tmp_path):
+    fake = tmp_path.joinpath("valhalla_build_tiles")
+    fake.write_text("#!/bin/sh\necho 'started'\nexec sleep 60\n", encoding="utf8")
+    fake.chmod(0o755)
+
+    stopper = threading.Timer(1.0, builder.terminate_current)
+    stopper.start()
+    try:
+        with pytest.raises(BuildError):
+            _run([str(fake)])
+    finally:
+        stopper.cancel()
+
+    assert builder._current is None

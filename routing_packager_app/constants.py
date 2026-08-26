@@ -30,3 +30,8 @@ class BuildStage(str, Enum):
     BUILDING_ELEVATION = "building_elevation"
     ENHANCING_TILES = "enhancing_tiles"
     SWAPPING = "swapping"
+
+
+class BuildOutcome(str, Enum):
+    BUILT = "built"
+    SKIPPED = "skipped"

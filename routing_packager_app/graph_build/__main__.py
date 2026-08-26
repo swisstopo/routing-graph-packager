@@ -1,15 +1,17 @@
+import argparse
 import asyncio
 import signal
 import sys
 import time
 from datetime import datetime, timezone
+from typing import List
 
 from arq import create_pool
 from arq.connections import RedisSettings
 from croniter import croniter
 
 from ..config import SETTINGS
-from ..constants import Providers
+from ..constants import BuildOutcome, Providers
 from ..logger import BUILD_LOGGER
 from ..utils.file_utils import lock_exclusive
 from .status import BUILD_STATUS
@@ -19,11 +21,16 @@ from .builder import (
     download_pbf,
     prune_generations,
     swap_graph_link,
+    terminate_current,
     update_pbf,
     write_build_meta,
 )
 
 SLEEP_CHUNK = 30
+
+EXIT_OK = 0
+EXIT_FAILED = 1
+EXIT_LOCKED = 75
 
 _stop = False
 
@@ -32,10 +39,25 @@ def _handle_signal(signum, _frame) -> None:
     global _stop
     _stop = True
     BUILD_LOGGER.info(f"Received signal {signum}, stopping after the current step.")
+    terminate_current()
 
 
 def _next_build_at() -> datetime:
     return croniter(SETTINGS.GRAPH_BUILD_CRON, datetime.now(timezone.utc)).get_next(datetime)
+
+
+def _next_build_at_or_none() -> datetime | None:
+    """
+    The next cron occurrence, where an external scheduler may own the schedule instead.
+
+    A one-shot build does not need ``GRAPH_BUILD_CRON`` to be set or valid, so the field it feeds
+    in the health report is the one thing that degrades: it stays empty unless the operator
+    mirrors the external schedule into the variable.
+    """
+    if not croniter.is_valid(SETTINGS.GRAPH_BUILD_CRON):
+        return None
+
+    return _next_build_at()
 
 
 def _sleep_until(when: datetime) -> None:
@@ -60,11 +82,13 @@ async def _enqueue_package_updates() -> None:
         await (getattr(pool, "aclose", None) or pool.close)()
 
 
-def run_build(provider: str) -> None:
+def run_build(provider: str) -> BuildOutcome:
     """
     Runs one full build: prune, update the PBF, build a generation and swap it in.
 
     :param provider: the dataset provider to build for.
+
+    :returns: whether a graph was built or the run gave way to a concurrent build.
     """
     link = SETTINGS.get_graph_link(provider)
     generations_dir = SETTINGS.get_generations_dir(provider)
@@ -76,7 +100,10 @@ def run_build(provider: str) -> None:
     with lock_exclusive(SETTINGS.get_build_lock_path(provider)) as acquired:
         if not acquired:
             BUILD_LOGGER.warning("Another graph build holds the build lock, skipping this run.")
-            return
+            return BuildOutcome.SKIPPED
+
+        if BUILD_STATUS.recover_interrupted():
+            BUILD_LOGGER.warning("The previous graph build did not finish, recording it as failed.")
 
         prune_generations(
             generations_dir,
@@ -100,24 +127,60 @@ def run_build(provider: str) -> None:
     # existing packages with the new data
     asyncio.run(_enqueue_package_updates())
 
+    return BuildOutcome.BUILT
 
-def main() -> int:
-    signal.signal(signal.SIGTERM, _handle_signal)
-    signal.signal(signal.SIGINT, _handle_signal)
 
+def run_once(provider: str) -> int:
+    """
+    Runs exactly one build and reports its result as an exit code.
+
+    This is the entry point for an external scheduler such as a Kubernetes ``CronJob``, which
+    owns the schedule itself and expects the container to do one unit of work and exit. Nothing
+    here reads ``GRAPH_BUILD_CRON``, beyond filling in the health report's ``next_build_at``.
+
+    :param provider: the dataset provider to build for.
+
+    :returns: ``EXIT_OK`` when a graph was built and swapped in, ``EXIT_LOCKED`` when another
+        build was already running and ``EXIT_FAILED`` when the build failed.
+    """
+    BUILD_LOGGER.info("Running a single graph build.")
+
+    try:
+        outcome = run_build(provider)
+    except BuildError as e:
+        BUILD_LOGGER.critical(f"Graph build failed, keeping the current graph: {e}")
+        BUILD_STATUS.failed(str(e))
+        return EXIT_FAILED
+    except Exception as e:  # pragma: no cover
+        BUILD_LOGGER.critical(f"Graph build failed unexpectedly, keeping the current graph: {e}")
+        BUILD_STATUS.failed(str(e))
+        return EXIT_FAILED
+
+    if outcome is BuildOutcome.SKIPPED:
+        return EXIT_LOCKED
+
+    BUILD_STATUS.idle(_next_build_at_or_none())
+
+    return EXIT_OK
+
+
+def run_scheduled(provider: str) -> int:
+    """
+    Builds on the ``GRAPH_BUILD_CRON`` schedule until the process is asked to stop.
+
+    :param provider: the dataset provider to build for.
+
+    :returns: ``EXIT_OK``, or ``EXIT_FAILED`` if the cron expression is unusable.
+    """
     if not croniter.is_valid(SETTINGS.GRAPH_BUILD_CRON):
         BUILD_LOGGER.critical(
             f"GRAPH_BUILD_CRON '{SETTINGS.GRAPH_BUILD_CRON}' is not a valid cron expression."
         )
-        return 1
-
-    provider = Providers.OSM.lower()
-    SETTINGS.get_provider_dir(provider).mkdir(parents=True, exist_ok=True)
-    link = SETTINGS.get_graph_link(provider)
+        return EXIT_FAILED
 
     BUILD_LOGGER.info(f"Graph builder started, GRAPH_BUILD_CRON is '{SETTINGS.GRAPH_BUILD_CRON}'.")
 
-    if not link.is_symlink():
+    if not SETTINGS.get_graph_link(provider).is_symlink():
         BUILD_LOGGER.info("No graph generation available yet, building immediately.")
     else:
         _sleep_until(_next_build_at())
@@ -147,7 +210,38 @@ def main() -> int:
 
     BUILD_LOGGER.info("Graph builder stopped.")
 
-    return 0
+    return EXIT_OK
+
+
+def _parse_args(argv: List[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="python -m routing_packager_app.graph_build",
+        description="Builds the Valhalla graph the packager creates its extracts from.",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Build once and exit, for an external scheduler such as a Kubernetes CronJob, "
+        "rather than looping on GRAPH_BUILD_CRON.",
+    )
+
+    return parser.parse_args(argv)
+
+
+def main(argv: List[str] | None = None) -> int:
+    args = _parse_args(argv)
+
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+
+    provider = Providers.OSM.lower()
+    SETTINGS.get_provider_dir(provider).mkdir(parents=True, exist_ok=True)
+    BUILD_STATUS.load()
+
+    if args.once:
+        return run_once(provider)
+
+    return run_scheduled(provider)
 
 
 if __name__ == "__main__":

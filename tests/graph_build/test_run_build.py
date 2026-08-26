@@ -5,6 +5,7 @@ import sys
 import pytest
 
 from routing_packager_app.config import SETTINGS
+from routing_packager_app.constants import BuildOutcome, BuildStage
 from routing_packager_app.graph_build import __main__ as graph_build_main
 from routing_packager_app.graph_build.builder import BuildError
 from routing_packager_app.graph_build.status import BUILD_STATUS, BuildStatus
@@ -145,3 +146,91 @@ def test_run_build_skips_when_another_build_holds_the_lock(build_env, monkeypatc
 
     assert not SETTINGS.get_graph_link().is_symlink()
     assert enqueued == []
+
+
+def test_run_build_reports_a_skipped_run(build_env, monkeypatch):
+    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
+
+    lock_path = SETTINGS.get_build_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    holder = subprocess.Popen(
+        [sys.executable, "-c", HOLD_BUILD_LOCK, str(lock_path)],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "locked"
+        assert graph_build_main.run_build("osm") is BuildOutcome.SKIPPED
+    finally:
+        holder.kill()
+        holder.wait()
+
+
+def test_run_build_recovers_an_interrupted_build(build_env, monkeypatch):
+    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
+    BUILD_STATUS.stage(BuildStage.BUILDING_TILES)
+    recovered = []
+    monkeypatch.setattr(BUILD_STATUS, "failed", lambda error: recovered.append(error))
+
+    graph_build_main.run_build("osm")
+
+    assert recovered == ["The build did not finish, its container stopped."]
+
+
+def test_once_builds_a_single_graph(build_env, monkeypatch):
+    _, enqueued = build_env
+    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
+
+    assert graph_build_main.main(["--once"]) == graph_build_main.EXIT_OK
+    assert SETTINGS.get_graph_link().resolve().name == "20260201T000000"
+    assert enqueued == [True]
+
+
+def test_once_ignores_the_cron_expression(build_env, monkeypatch):
+    monkeypatch.setattr(SETTINGS, "GRAPH_BUILD_CRON", "not a cron expression")
+    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
+
+    assert graph_build_main.main(["--once"]) == graph_build_main.EXIT_OK
+    assert json.loads(BUILD_STATUS.path.read_text())["next_build_at"] is None
+
+
+def test_once_reports_the_next_build_when_the_cron_is_set(build_env, monkeypatch):
+    monkeypatch.setattr(SETTINGS, "GRAPH_BUILD_CRON", "0 3 * * 0")
+    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
+
+    graph_build_main.main(["--once"])
+
+    assert json.loads(BUILD_STATUS.path.read_text())["next_build_at"] is not None
+
+
+def test_once_fails_with_an_exit_code(build_env, monkeypatch):
+    _, enqueued = build_env
+
+    def failing_build(*_args):
+        raise BuildError("valhalla_build_tiles blew up")
+
+    monkeypatch.setattr(graph_build_main, "build_graph", failing_build)
+
+    assert graph_build_main.main(["--once"]) == graph_build_main.EXIT_FAILED
+    report = json.loads(BUILD_STATUS.path.read_text())
+    assert report["state"] == "failed"
+    assert report["last_error"] == "valhalla_build_tiles blew up"
+    assert enqueued == []
+
+
+def test_once_reports_a_concurrent_build(build_env, monkeypatch):
+    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
+
+    lock_path = SETTINGS.get_build_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    holder = subprocess.Popen(
+        [sys.executable, "-c", HOLD_BUILD_LOCK, str(lock_path)],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "locked"
+        assert graph_build_main.main(["--once"]) == graph_build_main.EXIT_LOCKED
+    finally:
+        holder.kill()
+        holder.wait()

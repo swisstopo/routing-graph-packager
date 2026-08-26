@@ -26,6 +26,8 @@ from .status import BUILD_STATUS
 
 GENERATION_FORMAT = "%Y%m%dT%H%M%S"
 
+_current: subprocess.Popen | None = None
+
 
 class BuildError(Exception):
     """Raised when a graph build step fails and the symlink must not be swapped."""
@@ -56,7 +58,23 @@ def _log_tag(cmd: List[str]) -> str:
     return f"[{name.upper()}]"
 
 
+def terminate_current() -> None:
+    """
+    Stops the subprocess a build is currently waiting on, if there is one.
+
+    Called from the signal handler: a build spends nearly all of its wall clock inside one of
+    Valhalla's binaries, so a shutdown that does not reach the child only ends in the kernel
+    SIGKILLing it once the grace period runs out.
+    """
+    process = _current
+    if process is not None and process.poll() is None:
+        BUILD_LOGGER.info(f"Terminating {' '.join(process.args)}.")
+        process.terminate()
+
+
 def _run(cmd: List[str], stdout: TextIO | None = None, check: bool = True) -> int:
+    global _current
+
     BUILD_LOGGER.info(f"Running {' '.join(cmd)}")
     tag = _log_tag(cmd)
     with subprocess.Popen(
@@ -66,9 +84,13 @@ def _run(cmd: List[str], stdout: TextIO | None = None, check: bool = True) -> in
         text=True,
         bufsize=1,
     ) as process:
-        for line in process.stderr if stdout else process.stdout:
-            BUILD_LOGGER.info(f"{tag} {line.rstrip()}")
-            BUILD_STATUS.heartbeat()
+        _current = process
+        try:
+            for line in process.stderr if stdout else process.stdout:
+                BUILD_LOGGER.info(f"{tag} {line.rstrip()}")
+                BUILD_STATUS.heartbeat()
+        finally:
+            _current = None
 
     if check and process.returncode != 0:
         raise BuildError(f"'{cmd[0]}' failed with exit code {process.returncode}")
