@@ -99,9 +99,7 @@ args: ["graph-build", "--once"]
 | `1` | The build failed; the previous graph keeps serving |
 | `75` | Another build held the build lock, so this run did nothing |
 
-Because 75 is non-zero, a scheduler that retries on failure will retry a run that was merely superfluous. Under Kubernetes, pair `--once` with `concurrencyPolicy: Forbid` and a low `backoffLimit`.
-
-A build whose container is killed outright leaves the status file reading `building`, and it stays that way until the next run overwrites it. Nothing tries to guess whether a reported build is still alive — the scheduler's own job status is the authority on that.
+Because 75 is non-zero, a scheduler that retries on failure will retry a run that was merely superfluous. Under Kubernetes, use the `--once` flag with `concurrencyPolicy: Forbid` and a low `backoffLimit`.
 
 #### Relevant environment variables
 
@@ -143,7 +141,7 @@ The app is listening on `/api/v1/jobs` for new `POST` requests to generate some 
 
 The app exposes logs via the route `/api/v1/logs/{log_type}`. Available log types are `worker`, `app` and `builder`. The `builder` log holds the full output of `valhalla_build_tiles` and the PBF update, not just the build loop's own messages. Every line coming from a subprocess is tagged with its source — `[VALHALLA]` for all of Valhalla's binaries, `[WGET]` and `[PYOSMIUM-UP-TO-DATE]` for the others — so `grep '\[VALHALLA\]'` isolates a tile build, and `grep -v '\['` leaves the build loop's own messages. The graph builder additionally logs to stdout, so `docker logs routing-packager-graph-build` works too. An optional query parameter `?lines={n}` limits the output to the last `n` lines. Authentication is required.
 
-All three log files rotate at 10 MB and keep 10 archives, so `$TMP_DATA_DIR/logs` stays bounded. The endpoint always serves the live file.
+All three log files rotate at 10 MB and keep 10 archives. The endpoint always serves the live file.
 
 ### Health
 
@@ -187,11 +185,11 @@ All three log files rotate at 10 MB and keep 10 archives, so `$TMP_DATA_DIR/logs
 }
 ```
 
-`status` is `ok` when a graph is available and Postgres, Redis and the worker are all up, `degraded` otherwise. The response code is 200 either way — a fresh deployment that has not built a graph yet is degraded but not broken.
+`status` is `ok` when a graph is available and Postgres, Redis and the worker are all up, `degraded` otherwise.
 
 #### `graph`
 
-The generation currently symlinked, read from the `build_meta.json` the builder writes into it. `"available": false` means no graph has been built yet, or the symlink points at something unreadable. Note this replaces the previous `{"valhalla": {"8002": ..., "8003": ...}}` response, which reported on two Valhalla services that no longer run.
+The generation that is currently symlinked, read from the `build_meta.json` the builder writes into it. `"available": false` means no graph has been built yet, or the symlink points at something unreadable. 
 
 #### `build`
 
@@ -206,13 +204,9 @@ Read from `$TMP_DATA_DIR/<provider>/build_status.json`, which the graph build co
 | `next_build_at` | while idle: the next `GRAPH_BUILD_CRON` occurrence, or `externally_controlled` when the builder runs with `--once` and something else owns the schedule |
 | `last_error` | why the last build gave up, kept alongside the `stage` it died on |
 
-A failed build does not affect `graph.available`: the previously built generation is still there and still serveable.
-
 #### `services`
 
-Postgres is checked with a `SELECT 1`, Redis with a `PING`. The worker's entry comes from the health-check key ARQ's worker maintains: it is written every `health_check_interval` seconds (60, set in `WorkerSettings`) with a TTL one second longer, and deleted outright when the worker shuts down cleanly. So `"up": false` means the worker either stopped or has been unresponsive for more than a minute. `queued` is read live from the job queue; the remaining counters are the worker's own totals since it started.
-
-Because Postgres backs both authentication methods, the endpoint also accepts the admin credentials from `ADMIN_EMAIL`/`ADMIN_PASS` without a database round-trip. That is what lets it still answer, and report `postgres.up = false`, when Postgres is the thing that is down.
+Postgres is checked with a `SELECT 1`, Redis with a `PING`. The worker's entry comes from the health-check key ARQ's worker maintains. `"up": false` means the worker either stopped or has been unresponsive for more than a minute. `queued` is read live from the job queue.
 
 ### Authentication and Authorization 
 
