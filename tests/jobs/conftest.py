@@ -6,7 +6,6 @@ from sqlmodel import Session, select
 from routing_packager_app import SETTINGS
 from routing_packager_app.api_v1.models import Job
 from routing_packager_app.graph_build.builder import swap_graph_link
-from routing_packager_app.utils.file_utils import create_lock_file
 
 GENERATION_NAME = "20260101T000000"
 
@@ -48,7 +47,6 @@ def delete_dirs():
 def empty_graph():
     generation = SETTINGS.get_generations_dir().joinpath(GENERATION_NAME)
     generation.mkdir(parents=True)
-    create_lock_file(generation)
     swap_graph_link(SETTINGS.get_graph_link(), generation)
 
     yield generation

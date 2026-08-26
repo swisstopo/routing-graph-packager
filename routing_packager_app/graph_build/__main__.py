@@ -13,7 +13,7 @@ from croniter import croniter
 from ..config import SETTINGS
 from ..constants import BuildOutcome, Providers
 from ..logger import BUILD_LOGGER
-from ..utils.file_utils import lock_exclusive
+from ..utils.lock_utils import build_lock_name, lock_exclusive
 from .status import BUILD_STATUS
 from .builder import (
     BuildError,
@@ -97,7 +97,7 @@ def run_build(provider: str) -> BuildOutcome:
 
     # get a lock on the build directory, making sure there isn't another
     # graph build going on currently
-    with lock_exclusive(SETTINGS.get_build_lock_path(provider)) as acquired:
+    with lock_exclusive(build_lock_name(provider)) as acquired:
         if not acquired:
             BUILD_LOGGER.warning("Another graph build holds the build lock, skipping this run.")
             return BuildOutcome.SKIPPED
@@ -134,9 +134,9 @@ def run_once(provider: str) -> int:
     """
     Runs exactly one build and reports its result as an exit code.
 
-    This is the entry point for an external scheduler such as a Kubernetes ``CronJob``, which
-    owns the schedule itself and expects the container to do one unit of work and exit. Nothing
-    here reads ``GRAPH_BUILD_CRON``, beyond filling in the health report's ``next_build_at``.
+    This is the entry point for an external scheduler, which
+    owns the schedule and expects the container to do one unit of work and exit.
+    ``GRAPH_BUILD_CRON`` is ignored.
 
     :param provider: the dataset provider to build for.
 

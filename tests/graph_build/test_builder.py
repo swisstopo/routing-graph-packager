@@ -1,12 +1,13 @@
 import json
 import logging
 import shutil
-import subprocess
 import sys
 import threading
 
 import pytest
+from sqlalchemy import text
 
+from routing_packager_app.db import lock_engine
 from routing_packager_app.graph_build import builder
 from routing_packager_app.graph_build.builder import (
     BuildError,
@@ -17,19 +18,11 @@ from routing_packager_app.graph_build.builder import (
     swap_graph_link,
     update_pbf,
 )
-from routing_packager_app.utils.file_utils import (
-    LOCK_NAME,
-    create_lock_file,
+from routing_packager_app.utils.lock_utils import (
+    generation_lock_name,
     lock_generation_shared,
+    lock_key,
 )
-
-HOLD_SHARED_LOCK = """
-import fcntl, os, sys, time
-fd = os.open(sys.argv[1], os.O_RDONLY)
-fcntl.flock(fd, fcntl.LOCK_SH)
-print("locked", flush=True)
-time.sleep(60)
-"""
 
 
 @pytest.fixture
@@ -44,19 +37,16 @@ def graph_dirs(tmp_path):
 def make_generation(generations, name):
     generation = generations.joinpath(name)
     generation.mkdir()
-    create_lock_file(generation)
     generation.joinpath("tile.gph").write_bytes(b"tile")
 
     return generation
 
 
-def hold_shared_lock(lock_path):
-    holder = subprocess.Popen(
-        [sys.executable, "-c", HOLD_SHARED_LOCK, str(lock_path)],
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    assert holder.stdout.readline().strip() == "locked"
+def hold_shared_lock(link, generation):
+    key = lock_key(generation_lock_name(link.parent.name, generation.name))
+    holder = lock_engine.connect()
+    holder.execute(text("SELECT pg_advisory_lock_shared(:key)"), {"key": key})
+    holder.commit()
 
     return holder
 
@@ -123,13 +113,12 @@ def test_prune_aborts_the_build_when_a_generation_stays_held(graph_dirs):
     current = make_generation(generations, "20260108T000000")
     swap_graph_link(link, current)
 
-    holder = hold_shared_lock(old.joinpath(LOCK_NAME))
+    holder = hold_shared_lock(link, old)
     try:
         with pytest.raises(BuildError, match="still held by a packaging job"):
             prune_generations(generations, link, keep=1, timeout=0.2)
     finally:
-        holder.kill()
-        holder.wait()
+        holder.close()
 
     assert old.is_dir()
     assert current.is_dir()
@@ -139,18 +128,18 @@ def test_prune_aborts_the_build_when_a_generation_stays_held(graph_dirs):
 
 
 def test_prune_waits_for_a_reader_to_finish(graph_dirs, monkeypatch):
-    monkeypatch.setattr("routing_packager_app.utils.file_utils.LOCK_POLL_INTERVAL", 0.05)
+    monkeypatch.setattr("routing_packager_app.utils.lock_utils.LOCK_POLL_INTERVAL", 0.05)
     generations, link = graph_dirs
     old = make_generation(generations, "20260101T000000")
     current = make_generation(generations, "20260108T000000")
     swap_graph_link(link, current)
 
-    holder = hold_shared_lock(old.joinpath(LOCK_NAME))
-    threading.Timer(0.3, holder.kill).start()
+    holder = hold_shared_lock(link, old)
+    threading.Timer(0.3, holder.close).start()
     try:
         pruned = prune_generations(generations, link, keep=1, timeout=30)
     finally:
-        holder.wait()
+        holder.close()
 
     assert pruned == [old]
     assert not old.exists()

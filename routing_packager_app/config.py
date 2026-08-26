@@ -95,12 +95,6 @@ class BaseSettings(_BaseSettings):
         """
         return self.get_provider_dir(provider).joinpath("generations")
 
-    def get_build_lock_path(self, provider: str = Providers.OSM.lower()) -> Path:
-        """
-        Return the lock file guaranteeing a single concurrent graph build.
-        """
-        return self.get_provider_dir(provider).joinpath(".build.lock")
-
     def get_build_status_path(self, provider: str = Providers.OSM.lower()) -> Path:
         """
         Return the file the graph builder publishes its current stage to. It's

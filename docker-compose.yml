@@ -81,6 +81,7 @@ services:
     volumes:
       - tmp_data:/app/tmp_data
     depends_on:
+      - postgis
       - redis
     healthcheck:
       disable: true

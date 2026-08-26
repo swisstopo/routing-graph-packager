@@ -5,7 +5,6 @@ import pytest
 
 from routing_packager_app import SETTINGS
 from routing_packager_app.graph_build.builder import swap_graph_link
-from routing_packager_app.utils.file_utils import create_lock_file
 
 GENERATION_NAME = "20260101T000000"
 WORKER_HEALTH = b"Aug-25 11:41:20 j_complete=41 j_failed=1 j_retried=0 j_ongoing=2 queued=3"
@@ -50,7 +49,6 @@ def clean_state(get_app):
 def graph():
     generation = SETTINGS.get_generations_dir().joinpath(GENERATION_NAME)
     generation.mkdir(parents=True)
-    create_lock_file(generation)
     generation.joinpath("build_meta.json").write_text(
         json.dumps({"generation": GENERATION_NAME, "valhalla_version": "3.8.3", "elevation": False}),
         encoding="utf8",

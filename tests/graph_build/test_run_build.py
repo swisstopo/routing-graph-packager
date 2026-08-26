@@ -1,23 +1,26 @@
 import json
-import subprocess
-import sys
 
 import pytest
+from sqlalchemy import text
 
 from routing_packager_app.config import SETTINGS
 from routing_packager_app.constants import BuildOutcome, BuildStage
+from routing_packager_app.db import lock_engine
 from routing_packager_app.graph_build import __main__ as graph_build_main
 from routing_packager_app.graph_build.builder import BuildError
 from routing_packager_app.graph_build.status import BUILD_STATUS, BuildStatus
-from routing_packager_app.utils.file_utils import create_lock_file
+from routing_packager_app.utils.lock_utils import build_lock_name, lock_key
 
-HOLD_BUILD_LOCK = """
-import fcntl, os, sys, time
-fd = os.open(sys.argv[1], os.O_RDONLY | os.O_CREAT, 0o644)
-fcntl.flock(fd, fcntl.LOCK_EX)
-print("locked", flush=True)
-time.sleep(60)
-"""
+
+@pytest.fixture
+def build_lock_held():
+    holder = lock_engine.connect()
+    holder.execute(text("SELECT pg_advisory_lock(:key)"), {"key": lock_key(build_lock_name("osm"))})
+    holder.commit()
+    try:
+        yield holder
+    finally:
+        holder.close()
 
 
 @pytest.fixture
@@ -47,7 +50,6 @@ def fake_build_factory(name):
     def fake_build(generations_dir, _pbf):
         generation = generations_dir.joinpath(name)
         generation.mkdir(parents=True)
-        create_lock_file(generation)
         generation.joinpath("tile.gph").write_bytes(b"tile")
 
         return generation
@@ -126,44 +128,20 @@ def test_run_build_reports_the_stage_it_reached(build_env, monkeypatch):
     assert report["stage"] == "pruning"
 
 
-def test_run_build_skips_when_another_build_holds_the_lock(build_env, monkeypatch):
+def test_run_build_skips_when_another_build_holds_the_lock(build_env, build_lock_held, monkeypatch):
     _, enqueued = build_env
     monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
 
-    lock_path = SETTINGS.get_build_lock_path()
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    holder = subprocess.Popen(
-        [sys.executable, "-c", HOLD_BUILD_LOCK, str(lock_path)],
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        assert holder.stdout.readline().strip() == "locked"
-        graph_build_main.run_build("osm")
-    finally:
-        holder.kill()
-        holder.wait()
+    graph_build_main.run_build("osm")
 
     assert not SETTINGS.get_graph_link().is_symlink()
     assert enqueued == []
 
 
-def test_run_build_reports_a_skipped_run(build_env, monkeypatch):
+def test_run_build_reports_a_skipped_run(build_env, build_lock_held, monkeypatch):
     monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
 
-    lock_path = SETTINGS.get_build_lock_path()
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    holder = subprocess.Popen(
-        [sys.executable, "-c", HOLD_BUILD_LOCK, str(lock_path)],
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        assert holder.stdout.readline().strip() == "locked"
-        assert graph_build_main.run_build("osm") is BuildOutcome.SKIPPED
-    finally:
-        holder.kill()
-        holder.wait()
+    assert graph_build_main.run_build("osm") is BuildOutcome.SKIPPED
 
 
 def test_run_build_recovers_an_interrupted_build(build_env, monkeypatch):
@@ -218,19 +196,7 @@ def test_once_fails_with_an_exit_code(build_env, monkeypatch):
     assert enqueued == []
 
 
-def test_once_reports_a_concurrent_build(build_env, monkeypatch):
+def test_once_reports_a_concurrent_build(build_env, build_lock_held, monkeypatch):
     monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
 
-    lock_path = SETTINGS.get_build_lock_path()
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    holder = subprocess.Popen(
-        [sys.executable, "-c", HOLD_BUILD_LOCK, str(lock_path)],
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        assert holder.stdout.readline().strip() == "locked"
-        assert graph_build_main.main(["--once"]) == graph_build_main.EXIT_LOCKED
-    finally:
-        holder.kill()
-        holder.wait()
+    assert graph_build_main.main(["--once"]) == graph_build_main.EXIT_LOCKED

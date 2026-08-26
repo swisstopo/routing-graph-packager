@@ -21,7 +21,7 @@ from typing import List, TextIO
 from ..config import SETTINGS
 from ..constants import BuildStage
 from ..logger import BUILD_LOGGER
-from ..utils.file_utils import LOCK_NAME, create_lock_file, lock_exclusive
+from ..utils.lock_utils import generation_lock_name, lock_exclusive
 from .status import BUILD_STATUS
 
 GENERATION_FORMAT = "%Y%m%dT%H%M%S"
@@ -119,13 +119,12 @@ def prune_generations(generations_dir: Path, link: Path, keep: int, timeout: flo
     """
     Deletes graph generations that are neither current nor still held by a packaging job.
 
-    This is the only place tiles are ever deleted. A generation is only removed once an
-    exclusive lock on its lock file is granted, which guards it against workers holding a
-    shared lock for the duration of a zip.
+    This is the only place tiles are ever deleted. A generation is only removed once its
+    advisory lock is granted exclusively, which guards it against workers holding the same lock
+    shared for the duration of a packaging job.
 
-    Pruning has to finish before the build starts, because the build writes one more tile set
-    to disk. Skipping a locked generation and building anyway would leave `keep + 2` tile sets
-    where there is only room for `keep + 1`, so a held generation is waited on for up to
+    Pruning has to finish before the build starts. Skipping a locked generation and building
+    anyway could leave more than one tile set, so a held generation is waited on for up to
     `timeout` seconds and the build is aborted if it is still held after that. Aborting keeps
     the current graph in place and the next scheduled run tries again.
 
@@ -158,9 +157,9 @@ def prune_generations(generations_dir: Path, link: Path, keep: int, timeout: flo
         if generation in retained:
             continue
 
-        lock_path = generation.joinpath(LOCK_NAME)
+        lock_name = generation_lock_name(link.parent.name, generation.name)
         # try to prune
-        with lock_exclusive(lock_path) as acquired:
+        with lock_exclusive(lock_name) as acquired:
             if acquired:
                 pruned.append(_remove_generation(generation))
                 continue
@@ -171,7 +170,7 @@ def prune_generations(generations_dir: Path, link: Path, keep: int, timeout: flo
             f"Generation {generation.name} is held by a packaging job, waiting up to "
             f"{timeout:.0f}s before starting the build."
         )
-        with lock_exclusive(lock_path, timeout) as acquired:
+        with lock_exclusive(lock_name, timeout) as acquired:
             # the default timeout of one hour will rarely be
             # exceeded... _maybe_ if the registered packages stack
             # up over time
@@ -255,7 +254,6 @@ def build_graph(generations_dir: Path, pbf: Path) -> Path:
     BUILD_STATUS.stage(BuildStage.BUILDING_TILES)
     generation = generations_dir.joinpath(datetime.now(timezone.utc).strftime(GENERATION_FORMAT))
     generation.mkdir(parents=True)
-    create_lock_file(generation)
     BUILD_STATUS.generation(generation.name)
 
     elevation_dir = SETTINGS.get_elevation_dir()
@@ -306,22 +304,20 @@ def build_graph(generations_dir: Path, pbf: Path) -> Path:
             str(config_path),
             "-v",
         ])
-        BUILD_STATUS.stage(BuildStage.ENHANCING_TILES)
-        _run([
-            _binary("valhalla_build_tiles"),
-            "-c",
-            str(config_path),
-            "-s",
-            "enhance",
-            "-e",
-            "cleanup",
-            str(pbf),
-        ])
     else:
-        BUILD_LOGGER.warning(
-            "USE_ELEVATION is off, so the enhance and cleanup stages are skipped, as they were "
-            "in scripts/run_valhalla.sh."
-        )
+        BUILD_LOGGER.warning("USE_ELEVATION is off.")
+
+    BUILD_STATUS.stage(BuildStage.ENHANCING_TILES)
+    _run([
+        _binary("valhalla_build_tiles"),
+        "-c",
+        str(config_path),
+        "-s",
+        "enhance",
+        "-e",
+        "cleanup",
+        str(pbf),
+    ])
 
     return generation
 

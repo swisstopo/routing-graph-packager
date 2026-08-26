@@ -21,7 +21,8 @@ from .db import get_db
 from .api_v1.models import User, Job
 from .constants import Statuses
 from .logger import AppSmtpHandler, get_smtp_details, LOGGER
-from .utils.file_utils import lock_generation_shared, make_zip
+from .utils.file_utils import make_zip
+from .utils.lock_utils import lock_generation_shared
 from .utils.geom_utils import wkbe_to_geom, wkbe_to_str
 from .utils.valhalla_utils import get_tiles_with_bbox
 
