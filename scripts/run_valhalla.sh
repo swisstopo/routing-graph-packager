@@ -119,7 +119,8 @@ while true; do
     --additional-data-elevation "$ELEVATION_DIR" \
     --mjolnir-concurrency "$CONCURRENCY" \
     --mjolnir-max-cache-size "$MAX_CACHE_SIZE" \
-    --logging-type "" \
+    --logging-type "file" \
+    --logging-file-name "$TMP_DATA_DIR/logs/valhalla.log" \
     > "${valhalla_config}" || exit 1
 
   # wait until there's no .lock file anymore
