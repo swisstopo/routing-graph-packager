@@ -102,9 +102,6 @@ def run_build(provider: str) -> BuildOutcome:
             BUILD_LOGGER.warning("Another graph build holds the build lock, skipping this run.")
             return BuildOutcome.SKIPPED
 
-        if BUILD_STATUS.recover_interrupted():
-            BUILD_LOGGER.warning("The previous graph build did not finish, recording it as failed.")
-
         prune_generations(
             generations_dir,
             link,
@@ -236,7 +233,6 @@ def main(argv: List[str] | None = None) -> int:
 
     provider = Providers.OSM.lower()
     SETTINGS.get_provider_dir(provider).mkdir(parents=True, exist_ok=True)
-    BUILD_STATUS.load()
 
     if args.once:
         return run_once(provider)

@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import text
 
 from routing_packager_app.config import SETTINGS
-from routing_packager_app.constants import BuildOutcome, BuildStage
+from routing_packager_app.constants import BuildOutcome
 from routing_packager_app.db import lock_engine
 from routing_packager_app.graph_build import __main__ as graph_build_main
 from routing_packager_app.graph_build.builder import BuildError
@@ -142,17 +142,6 @@ def test_run_build_reports_a_skipped_run(build_env, build_lock_held, monkeypatch
     monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
 
     assert graph_build_main.run_build("osm") is BuildOutcome.SKIPPED
-
-
-def test_run_build_recovers_an_interrupted_build(build_env, monkeypatch):
-    monkeypatch.setattr(graph_build_main, "build_graph", fake_build_factory("20260201T000000"))
-    BUILD_STATUS.stage(BuildStage.BUILDING_TILES)
-    recovered = []
-    monkeypatch.setattr(BUILD_STATUS, "failed", lambda error: recovered.append(error))
-
-    graph_build_main.run_build("osm")
-
-    assert recovered == ["The build did not finish, its container stopped."]
 
 
 def test_once_builds_a_single_graph(build_env, monkeypatch):

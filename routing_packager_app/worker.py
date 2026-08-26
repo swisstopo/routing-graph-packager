@@ -145,6 +145,8 @@ def _sort_jobs(jobs_: Sequence[Job]) -> List[Job]:
     :param jobs_: the jobs to sort.
 
     :returns: the sorted jobs.
+
+    This helps to fairly balance jobs across multiple worker threads.
     """
     return [
         job
@@ -158,7 +160,7 @@ def _sort_jobs(jobs_: Sequence[Job]) -> List[Job]:
 
 async def update_all_packages(ctx):
     """
-    Re-creates every package flagged for updating from the current graph generation.
+    Re-creates every package from the current graph generation.
 
     Enqueued by the graph build container after it swapped in a new generation. Packages are
     rebuilt in place, sequentially, largest bbox first.

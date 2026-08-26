@@ -27,7 +27,7 @@ def _is_admin(auth: HTTPBasicCredentials | None) -> bool:
     """
     Checks the basic auth credentials against the configured admin without touching the database.
 
-    ``User.add_admin_user`` seeds the admin from the environment at startup.
+    ``User.add_admin_user`` creates the admin from the environment at startup.
     It exists so that the endpoint can still answer, and report
     the database as down.
 

@@ -61,6 +61,7 @@ def get_smtp_details(toaddrs: List[str]):
     return conf
 
 
+# for the log rotation
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 10
 

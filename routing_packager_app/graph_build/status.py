@@ -2,14 +2,11 @@
 Publishes what the graph builder is currently doing to a file on the shared volume.
 
 The builder runs in its own container, so the API app cannot ask it anything directly. Instead
-every stage transition is written atomically to ``build_status.json`` next to the ``graph``
+every stage transition is written to ``build_status.json`` next to the ``graph``
 symlink, where ``/api/v1/health`` reads it.
 
 Long stages additionally refresh ``updated_at``, so a reader can see when the builder was last
 heard from rather than only when the current stage started.
-
-The file outlives the process that writes it, which is what lets a builder started as a one-shot
-job pick up where the previous run left off instead of overwriting its result.
 """
 
 import json
@@ -41,41 +38,6 @@ class BuildStatus:
             "next_build_at": None,
             "last_error": None,
         }
-
-    def load(self) -> None:
-        """
-        Reads a status file left behind by an earlier run into this instance.
-
-        Without it every fresh process starts from an empty report and its first write drops the
-        previous run's ``last_error`` and ``next_build_at``. That is harmless for a builder that
-        loops forever and writes the fields back within seconds, but under an external scheduler
-        there is a new process for every single build.
-        """
-        try:
-            stored = json.loads(self.path.read_text(encoding="utf8"))
-        except (OSError, ValueError):
-            return
-
-        if not isinstance(stored, dict):
-            return
-
-        self._data.update({k: v for k, v in stored.items() if k in self._data})
-
-    def recover_interrupted(self) -> bool:
-        """
-        Turns a build left in ``building`` by a stopped container into a failure.
-
-        Only correct where the caller holds the exclusive build lock: nobody else can be building
-        at that point, so a loaded ``building`` state belongs to a process that no longer exists.
-
-        :returns: whether a stopped build was found.
-        """
-        if self._data["state"] != BuildState.BUILDING.value:
-            return False
-
-        self.failed("The build did not finish, its container stopped.")
-
-        return True
 
     def stage(self, stage: BuildStage) -> None:
         """

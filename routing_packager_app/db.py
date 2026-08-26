@@ -8,6 +8,9 @@ from .config import SETTINGS as S
 
 SQLALCHEMY_DATABASE_URI: str = f"postgresql://{S.POSTGRES_USER}:{S.POSTGRES_PASS}@{S.POSTGRES_HOST}:{S.POSTGRES_PORT}/{S.POSTGRES_DB}"
 
+# important for the locking mechanism:
+# keeps the connection alive for
+# long lasting locks
 KEEPALIVE_ARGS = {
     "keepalives": 1,
     "keepalives_idle": 30,
@@ -17,6 +20,8 @@ KEEPALIVE_ARGS = {
 
 engine = create_engine(SQLALCHEMY_DATABASE_URI, echo=bool(os.getenv("DEBUG")), future=True)
 
+# additional engine separate from the main
+# session pool for the tile lock mechanism
 lock_engine = create_engine(
     SQLALCHEMY_DATABASE_URI,
     echo=bool(os.getenv("DEBUG")),

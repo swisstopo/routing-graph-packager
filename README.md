@@ -71,13 +71,15 @@ Before each build the planet PBF is brought up to date with [`pyosmium-up-to-dat
 
 #### Graph generations
 
-Every build writes into a **new** directory, `$TMP_DATA_DIR/osm/generations/<timestamp>/`. Nothing is ever overwritten in place, so no packaging job can be reading a directory while it is being written. When the build succeeds, the symlink `$TMP_DATA_DIR/osm/graph` is repointed at it with a single atomic `rename(2)`. That symlink is the only source of truth for "which graph is current" — the worker resolves it when a job starts.
+A **generation** refers to a finished graph on disk (plus some metadata), represented as a directory with a timestamp name.
+
+Every build writes into a **new** directory, `$TMP_DATA_DIR/osm/generations/<timestamp>/`. Nothing is ever overwritten in place, so no packaging job can be reading a directory while it is being written to. When the build succeeds, the symlink `$TMP_DATA_DIR/osm/graph` is re-directed at it with a single atomic `rename(2)`. That symlink is the source of truth for "which graph is current".
 
 A failed build simply leaves the symlink alone, so the previous graph keeps serving packages.
 
-Old generations are deleted at the **start** of the next build rather than the end, so anything still holding the previous generation has had a full cron interval to finish. On top of that, deletion is fenced with a Postgres advisory lock, one per generation: the builder must be granted it exclusively before removing a generation, and every worker holds the same lock shared for as long as it is zipping tiles from it. A second advisory lock, one per provider, admits a single graph build at a time.
+Old generations are deleted at the **start** of the next build rather than the end, so anything still holding the previous generation has had a full cron interval to finish. On top of that, deletion is guarded with a Postgres advisory lock, one per generation: the builder must have an exclusive lock before removing a generation, and every worker holds the same lock shared for as long as it is packaging tiles from it. A second advisory lock, one per provider, admits a single graph build at a time.
 
-The locks live in Postgres rather than on the filesystem so that the builder does not have to share a kernel — and therefore a machine — with the workers. All they need in common is the volume and the database. Two consequences worth knowing: a lock is held by the Postgres session that took it, so the connection has to stay up for as long as the lock does (libpq keepalives are configured for exactly this, see `lock_engine` in `db.py`), and a Postgres restart drops every advisory lock, which is why the single-builder guarantee should come from the scheduler rather than resting on the lock alone.
+The locks live in Postgres rather than on the filesystem so that the builder does not have to share a machine with the workers.
 
 Pruning has to finish *before* the build starts, since the build itself adds one more tile set to disk. If a generation is still being packaged, the builder waits up to `GRAPH_PRUNE_TIMEOUT` seconds for that job to finish. If it is still held after that, the build is aborted rather than started — starting it would put one more tile set on disk than there is room for. An aborted build leaves the current graph serving and the next scheduled run tries again.
 
@@ -101,12 +103,7 @@ args: ["graph-build", "--once"]
 
 Because 75 is non-zero, a scheduler that retries on failure will retry a run that was merely superfluous. Under Kubernetes, pair `--once` with `concurrencyPolicy: Forbid` and a low `backoffLimit`.
 
-Two more things matter once the builder is a short-lived job:
-
-- **The builder needs Postgres, not a shared kernel.** It can run anywhere that reaches the database and the shared volume; nothing has to be co-located. Do not put a transaction-pooling pgbouncer between the builder and Postgres — session-level advisory locks do not survive it — and leave `idle_session_timeout` at its `0` default, or set it above the longest build, so the lock connection is not reaped mid-build.
-- **Give the pod time to shut down.** `SIGTERM` is forwarded to the running Valhalla process, which then exits non-zero and fails the build cleanly, recording the reason in the status file. That takes longer than the default 30s grace period on a planet build, so raise `terminationGracePeriodSeconds` and set `activeDeadlineSeconds` well above a full build.
-
-A build whose container is killed outright leaves the status file reading `building`. The next build recognises it — it can only take the build lock if nobody else is building — and records it as failed before starting. In between, the scheduler's own job status is the authority.
+A build whose container is killed outright leaves the status file reading `building`, and it stays that way until the next run overwrites it. Nothing tries to guess whether a reported build is still alive — the scheduler's own job status is the authority on that.
 
 #### Relevant environment variables
 
