@@ -16,6 +16,7 @@ from ...config import SETTINGS
 from ...constants import BuildState
 from ...db import get_db
 from ..models import APIKeys, APIPermission, User
+from ...utils.file_utils import resolve_graph
 
 router = APIRouter()
 
@@ -65,11 +66,11 @@ def _graph_report() -> Dict[str, Any]:
     link = SETTINGS.get_graph_link()
     report: Dict[str, Any] = {"available": False, "path": str(link)}
 
-    if not link.is_symlink():
+    generation = resolve_graph()
+    if generation is None:
         return report
 
     try:
-        generation = link.resolve(strict=True)
         meta = json.loads(generation.joinpath("build_meta.json").read_text(encoding="utf8"))
     except (OSError, ValueError):
         return report

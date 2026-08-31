@@ -152,6 +152,36 @@ The app exposes logs via the route `/api/v1/logs/{log_type}`. Available log type
 
 All three log files rotate at 10 MB and keep 10 archives. The endpoint always serves the live file.
 
+### Readiness
+
+`GET /api/v1/readyz` answers whether this app instance can take packaging jobs. It needs **no authentication**, and the status code carries the whole signal:
+
+| Code | Meaning |
+|---|---|
+| `200` | `{"ready": true}` |
+| `503` | `{"ready": false}` |
+
+It checks the four things the app itself needs to turn a submitted job into a queued one: a graph exists behind the symlink, Postgres answers, Redis answers, and the output directory is writable. A fresh deployment therefore reads `503` until the first graph build has finished.
+
+Two things it deliberately does not check:
+
+  - **Whether a worker is alive.** That belongs to the worker's container. Failing readiness here would pull the HTTP API out of its service, so nobody could even call `/api/v1/jobs/{id}` to find out why their job was stuck. Use `/api/v1/health` for that.
+  - **Whether a build is running.** A build writes into a fresh generation and leaves the current one serving until it swaps the symlink, so packaging is unaffected.
+
+The body is one bit on purpose. When it says `false`, `/api/v1/health` says which of the four it was.
+
+This is what the image's `HEALTHCHECK` uses, and it is what a Kubernetes `readinessProbe` should point at:
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /api/v1/readyz
+    port: 5000
+  periodSeconds: 10
+```
+
+Do **not** point a `livenessProbe` at it. Liveness restarts the container, so a brief Postgres outage would restart every pod at once and turn a short outage into a long one. Readiness only stops traffic, and recovers on its own.
+
 ### Health
 
 `GET /api/v1/health` reports the graph being served, what the graph builder is doing, and whether the backing services are reachable. **Authentication is required** — basic auth or an `internal` API key. This is a breaking change: the endpoint used to answer anyone.
@@ -194,7 +224,7 @@ All three log files rotate at 10 MB and keep 10 archives. The endpoint always se
 }
 ```
 
-`status` is `ok` when a graph is available and Postgres, Redis and the worker are all up, `degraded` otherwise.
+`status` is `ok` when a graph is available and Postgres, Redis and the worker are all up, `degraded` otherwise. Note the endpoint answers `200` either way — it is a diagnostic view for a human, not a probe. `/api/v1/readyz` is the one that signals through the status code.
 
 #### `graph`
 
