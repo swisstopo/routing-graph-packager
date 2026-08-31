@@ -1,40 +1,32 @@
 import os
-import subprocess
-import sys
+import socket
 import threading
+from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import Interval, insert, literal, select
 
-from routing_packager_app.db import lock_engine
+from routing_packager_app.api_v1.models import GraphLock
+from routing_packager_app.config import SETTINGS
+from routing_packager_app.constants import LockMode
+from routing_packager_app.db import engine
 from routing_packager_app.graph_build.builder import swap_graph_link
 from routing_packager_app.utils import lock_utils
 from routing_packager_app.utils.lock_utils import (
-    build_lock_name,
-    generation_lock_name,
     lock_exclusive,
     lock_generation_shared,
-    lock_key,
+    lock_path,
 )
 
-KEY_IN_SUBPROCESS = """
-import sys
-sys.path.insert(0, %r)
-from routing_packager_app.utils.lock_utils import lock_key
-print(lock_key("rgp:build:osm"))
-"""
+
+@pytest.fixture
+def provider_dir():
+    return SETTINGS.get_provider_dir()
 
 
 @pytest.fixture
-def name(tmp_path):
-    return build_lock_name(tmp_path.name)
-
-
-@pytest.fixture
-def graph(tmp_path):
-    generations = tmp_path.joinpath("generations")
-    generations.mkdir()
-    link = tmp_path.joinpath("graph")
+def graph(graph_dirs):
+    generations, link = graph_dirs
 
     def make(generation_name):
         generation = generations.joinpath(generation_name)
@@ -46,132 +38,234 @@ def graph(tmp_path):
     return link, make
 
 
-def hold(name, shared=False):
-    function = "pg_advisory_lock_shared" if shared else "pg_advisory_lock"
-    holder = lock_engine.connect()
-    holder.execute(text(f"SELECT {function}(:key)"), {"key": lock_key(name)})
-    holder.commit()
+def hold(path, mode=LockMode.EXCLUSIVE, ttl=None):
+    """Takes a lock on a connection that is closed again before this returns."""
+    if ttl is None:
+        ttl = SETTINGS.GRAPH_LOCK_TTL
 
-    return holder
-
-
-def test_exclusive_is_granted_when_nobody_holds_it(name):
-    with lock_exclusive(name) as acquired:
-        assert acquired is True
-
-
-def test_exclusive_excludes_another_exclusive(name):
-    holder = hold(name)
+    conn = engine.connect()
     try:
-        with lock_exclusive(name) as acquired:
-            assert acquired is False
+        lock_id = conn.execute(
+            insert(GraphLock)
+            .values(
+                path=lock_path(path),
+                mode=mode,
+                holder="test",
+                acquired_at=lock_utils._utc_now(),
+                expires_at=lock_utils._utc_now() + literal(timedelta(seconds=ttl), Interval()),
+            )
+            .returning(GraphLock.id)
+        ).scalar_one()
+        conn.commit()
+
+        return lock_id
     finally:
-        holder.close()
+        conn.close()
 
 
-def test_exclusive_is_released_on_exit(name):
-    with lock_exclusive(name) as acquired:
+def rows(path=None):
+    statement = select(GraphLock)
+    if path is not None:
+        statement = statement.where(GraphLock.path == lock_path(path))
+
+    with engine.connect() as conn:
+        return conn.execute(statement).all()
+
+
+def test_exclusive_is_granted_when_nobody_holds_it(provider_dir):
+    with lock_exclusive(provider_dir) as acquired:
         assert acquired is True
 
-    with lock_exclusive(name) as acquired:
+
+def test_exclusive_excludes_another_exclusive(provider_dir):
+    hold(provider_dir)
+
+    with lock_exclusive(provider_dir) as acquired:
+        assert acquired is False
+
+
+def test_exclusive_is_released_on_exit(provider_dir):
+    with lock_exclusive(provider_dir) as acquired:
+        assert acquired is True
+
+    assert rows(provider_dir) == []
+    with lock_exclusive(provider_dir) as acquired:
         assert acquired is True
 
 
-def test_exclusive_is_released_when_the_body_raises(name):
+def test_exclusive_is_released_when_the_body_raises(provider_dir):
     with pytest.raises(ValueError):
-        with lock_exclusive(name):
+        with lock_exclusive(provider_dir):
             raise ValueError("boom")
 
-    with lock_exclusive(name) as acquired:
+    with lock_exclusive(provider_dir) as acquired:
         assert acquired is True
 
 
-def test_shared_does_not_exclude_shared(name):
-    first = hold(name, shared=True)
-    second = hold(name, shared=True)
-    try:
-        assert first is not second
-    finally:
-        first.close()
-        second.close()
+def test_shared_does_not_exclude_shared(graph):
+    link, make = graph
+    generation = make("20260101T000000")
+    swap_graph_link(link, generation)
+
+    with lock_generation_shared(link) as first:
+        with lock_generation_shared(link) as second:
+            assert first == second == generation
+            assert len(rows(generation)) == 2
 
 
-def test_exclusive_excludes_a_shared_holder(name):
-    holder = hold(name, shared=True)
-    try:
-        with lock_exclusive(name) as acquired:
-            assert acquired is False
-    finally:
-        holder.close()
+def test_exclusive_excludes_a_shared_holder(graph):
+    _, make = graph
+    generation = make("20260101T000000")
 
-    with lock_exclusive(name) as acquired:
+    lock_id = hold(generation, LockMode.SHARED)
+    with lock_exclusive(generation) as acquired:
+        assert acquired is False
+
+    lock_utils._release(lock_id)
+    with lock_exclusive(generation) as acquired:
         assert acquired is True
 
 
-def test_exclusive_waits_out_a_shared_holder(name, monkeypatch):
+def test_shared_is_excluded_by_an_exclusive_holder(graph):
+    link, make = graph
+    generation = make("20260101T000000")
+    swap_graph_link(link, generation)
+    hold(generation, LockMode.EXCLUSIVE)
+
+    with pytest.raises(OSError, match="still held by the graph build"):
+        with lock_generation_shared(link, timeout=0.0):
+            pass
+
+
+def test_exclusive_waits_out_a_shared_holder(graph, monkeypatch):
     monkeypatch.setattr(lock_utils, "LOCK_POLL_INTERVAL", 0.05)
-    holder = hold(name, shared=True)
-    threading.Timer(0.3, holder.close).start()
+    _, make = graph
+    generation = make("20260101T000000")
 
-    with lock_exclusive(name, timeout=30) as acquired:
+    lock_id = hold(generation, LockMode.SHARED)
+    threading.Timer(0.3, lock_utils._release, [lock_id]).start()
+
+    with lock_exclusive(generation, timeout=30) as acquired:
         assert acquired is True
 
 
-def test_exclusive_gives_up_after_the_timeout(name, monkeypatch):
+def test_exclusive_gives_up_after_the_timeout(graph, monkeypatch):
     monkeypatch.setattr(lock_utils, "LOCK_POLL_INTERVAL", 0.05)
-    holder = hold(name, shared=True)
-    try:
-        with lock_exclusive(name, timeout=0.2) as acquired:
-            assert acquired is False
-    finally:
-        holder.close()
+    _, make = graph
+    generation = make("20260101T000000")
+    hold(generation, LockMode.SHARED)
+
+    with lock_exclusive(generation, timeout=0.2) as acquired:
+        assert acquired is False
 
 
-def test_closing_a_connection_releases_its_lock(name):
-    holder = hold(name)
-    holder.close()
+def test_a_lock_outlives_the_connection_that_took_it(provider_dir):
+    hold(provider_dir)
 
-    with lock_exclusive(name) as acquired:
+    assert len(rows(provider_dir)) == 1
+    with lock_exclusive(provider_dir) as acquired:
+        assert acquired is False
+
+
+def test_an_expired_lock_does_not_block(provider_dir):
+    hold(provider_dir, ttl=-1)
+
+    with lock_exclusive(provider_dir) as acquired:
         assert acquired is True
 
 
-def test_a_holder_does_not_sit_in_a_transaction(name):
-    with lock_exclusive(name) as acquired:
+def test_acquiring_reaps_every_expired_row(provider_dir, graph):
+    _, make = graph
+    generation = make("20260101T000000")
+    hold(generation, LockMode.SHARED, ttl=-1)
+
+    with lock_exclusive(provider_dir):
+        pass
+
+    assert rows(generation) == []
+
+
+def test_locks_on_different_paths_do_not_interfere(provider_dir, graph):
+    _, make = graph
+    generation = make("20260101T000000")
+    hold(generation)
+
+    with lock_exclusive(provider_dir) as acquired:
         assert acquired is True
-        with lock_engine.connect() as observer:
-            states = observer.execute(
-                text(
-                    "SELECT DISTINCT a.state FROM pg_stat_activity a "
-                    "JOIN pg_locks l ON l.pid = a.pid "
-                    "WHERE l.locktype = 'advisory' AND a.pid <> pg_backend_pid()"
-                )
-            ).scalars()
-
-            assert list(states) == ["idle"]
 
 
-def test_the_key_is_stable_across_processes():
-    env = dict(os.environ, PYTHONHASHSEED="1")
-    out = subprocess.run(
-        [sys.executable, "-c", KEY_IN_SUBPROCESS % os.getcwd()],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+def test_only_one_of_two_racing_exclusives_wins(provider_dir):
+    name = lock_path(provider_dir)
+    barrier = threading.Barrier(2)
+    won = []
 
-    assert int(out.stdout.strip()) == lock_key("rgp:build:osm")
+    def race():
+        barrier.wait()
+        won.append(lock_utils._try_acquire(name, LockMode.EXCLUSIVE))
+
+    threads = [threading.Thread(target=race) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len([lock_id for lock_id in won if lock_id is not None]) == 1
 
 
-def test_the_key_fits_a_postgres_bigint():
-    key = lock_key("rgp:generation:osm:20260201T000000")
+def test_a_racing_shared_and_exclusive_cannot_both_win(graph):
+    _, make = graph
+    name = lock_path(make("20260101T000000"))
+    barrier = threading.Barrier(2)
+    won = []
 
-    assert -(2**63) <= key < 2**63
+    def race(mode):
+        barrier.wait()
+        won.append(lock_utils._try_acquire(name, mode))
+
+    threads = [
+        threading.Thread(target=race, args=(mode,)) for mode in (LockMode.SHARED, LockMode.EXCLUSIVE)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len([lock_id for lock_id in won if lock_id is not None]) == 1
 
 
-def test_generation_keys_are_namespaced_per_provider():
-    assert lock_key(generation_lock_name("osm", "20260201T000000")) != lock_key(
-        generation_lock_name("here", "20260201T000000")
-    )
+def test_the_lease_lasts_the_configured_ttl(provider_dir):
+    with lock_exclusive(provider_dir):
+        row = rows(provider_dir)[0]
+
+    assert row.expires_at - row.acquired_at == timedelta(seconds=SETTINGS.GRAPH_LOCK_TTL)
+
+
+def test_the_lease_is_stamped_in_utc(provider_dir):
+    with lock_exclusive(provider_dir):
+        row = rows(provider_dir)[0]
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    assert abs(row.acquired_at - now) < timedelta(minutes=1)
+
+
+def test_the_holder_records_host_and_pid(provider_dir):
+    with lock_exclusive(provider_dir):
+        row = rows(provider_dir)[0]
+
+    assert row.holder == f"{socket.gethostname()}:{os.getpid()}"
+
+
+def test_lock_path_is_relative_to_the_data_dir(graph):
+    _, make = graph
+    generation = make("20260101T000000")
+
+    assert lock_path(generation) == f"osm/generations/{generation.name}"
+
+
+def test_lock_path_rejects_a_path_outside_the_data_dir(tmp_path):
+    with pytest.raises(ValueError):
+        lock_path(tmp_path)
 
 
 def test_lock_generation_shared_yields_the_current_generation(graph):
@@ -197,8 +291,7 @@ def test_lock_generation_shared_holds_off_the_pruner(graph):
     swap_graph_link(link, generation)
 
     with lock_generation_shared(link):
-        name = generation_lock_name(link.parent.name, generation.name)
-        with lock_exclusive(name) as acquired:
+        with lock_exclusive(generation) as acquired:
             assert acquired is False
 
 
@@ -211,13 +304,13 @@ def test_lock_generation_shared_re_resolves_when_the_symlink_moved(graph, monkey
     acquires = []
     real_acquire = lock_utils._acquire
 
-    def moving_acquire(conn, function, key, timeout):
-        acquired = real_acquire(conn, function, key, timeout)
-        acquires.append(key)
+    def moving_acquire(path, mode, timeout):
+        lock_id = real_acquire(path, mode, timeout)
+        acquires.append(path)
         if len(acquires) == 1:
             swap_graph_link(link, second)
 
-        return acquired
+        return lock_id
 
     monkeypatch.setattr(lock_utils, "_acquire", moving_acquire)
 
@@ -236,13 +329,13 @@ def test_lock_generation_shared_releases_the_generation_it_gave_up_on(graph, mon
     real_acquire = lock_utils._acquire
     moved = []
 
-    def moving_acquire(conn, function, key, timeout):
-        acquired = real_acquire(conn, function, key, timeout)
+    def moving_acquire(path, mode, timeout):
+        lock_id = real_acquire(path, mode, timeout)
         if not moved:
             moved.append(True)
             swap_graph_link(link, second)
 
-        return acquired
+        return lock_id
 
     monkeypatch.setattr(lock_utils, "_acquire", moving_acquire)
 
@@ -250,5 +343,5 @@ def test_lock_generation_shared_releases_the_generation_it_gave_up_on(graph, mon
         pass
 
     monkeypatch.undo()
-    with lock_exclusive(generation_lock_name(link.parent.name, first.name)) as acquired:
+    with lock_exclusive(first) as acquired:
         assert acquired is True

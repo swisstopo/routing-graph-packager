@@ -35,3 +35,8 @@ class BuildStage(str, Enum):
 class BuildOutcome(str, Enum):
     BUILT = "built"
     SKIPPED = "skipped"
+
+
+class LockMode(str, Enum):
+    SHARED = "shared"
+    EXCLUSIVE = "exclusive"

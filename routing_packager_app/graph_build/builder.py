@@ -21,7 +21,7 @@ from typing import List, TextIO
 from ..config import SETTINGS
 from ..constants import BuildStage
 from ..logger import BUILD_LOGGER
-from ..utils.lock_utils import generation_lock_name, lock_exclusive
+from ..utils.lock_utils import lock_exclusive
 from .status import BUILD_STATUS
 
 GENERATION_FORMAT = "%Y%m%dT%H%M%S"
@@ -120,8 +120,8 @@ def prune_generations(generations_dir: Path, link: Path, keep: int, timeout: flo
     Deletes graph generations that are neither current nor still held by a packaging job.
 
     This is the only place tiles are ever deleted. A generation is only removed once its
-    advisory lock is granted exclusively, which guards it against workers holding the same lock
-    shared for the duration of a packaging job.
+    lock is granted exclusively, which guards it against workers holding the same lock shared for
+    the duration of a packaging job.
 
     Pruning has to finish before the build starts. Skipping a locked generation and building
     anyway could leave more than one tile set, so a held generation is waited on for up to
@@ -157,9 +157,8 @@ def prune_generations(generations_dir: Path, link: Path, keep: int, timeout: flo
         if generation in retained:
             continue
 
-        lock_name = generation_lock_name(link.parent.name, generation.name)
         # try to prune
-        with lock_exclusive(lock_name) as acquired:
+        with lock_exclusive(generation) as acquired:
             if acquired:
                 pruned.append(_remove_generation(generation))
                 continue
@@ -170,7 +169,7 @@ def prune_generations(generations_dir: Path, link: Path, keep: int, timeout: flo
             f"Generation {generation.name} is held by a packaging job, waiting up to "
             f"{timeout:.0f}s before starting the build."
         )
-        with lock_exclusive(lock_name, timeout) as acquired:
+        with lock_exclusive(generation, timeout) as acquired:
             # the default timeout of one hour will rarely be
             # exceeded... _maybe_ if the registered packages stack
             # up over time

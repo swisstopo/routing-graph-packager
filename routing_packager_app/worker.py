@@ -17,7 +17,7 @@ from starlette.status import (
 
 from .api_v1.dependencies import split_bbox
 from .config import SETTINGS
-from .db import get_db
+from .db import create_tables, get_db
 from .api_v1.models import User, Job
 from .constants import Statuses
 from .logger import AppSmtpHandler, get_smtp_details, LOGGER
@@ -207,12 +207,17 @@ async def update_all_packages(ctx):
     return {"total": len(jobs), "succeeded": succeeded}
 
 
+async def startup(ctx):
+    create_tables()
+
+
 class WorkerSettings:
     """
     Settings for the ARQ worker.
     """
 
     redis_settings = RedisSettings.from_dsn(SETTINGS.REDIS_URL)
+    on_startup = startup
     functions = [create_package, update_all_packages]
     job_timeout = 60 * 60 * 24
     health_check_interval = 60

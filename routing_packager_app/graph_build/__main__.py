@@ -12,8 +12,9 @@ from croniter import croniter
 
 from ..config import SETTINGS
 from ..constants import BuildOutcome, Providers
+from ..db import create_tables
 from ..logger import BUILD_LOGGER
-from ..utils.lock_utils import build_lock_name, lock_exclusive
+from ..utils.lock_utils import lock_exclusive
 from .status import BUILD_STATUS, EXTERNAL_SCHEDULE
 from .builder import (
     BuildError,
@@ -83,7 +84,7 @@ def run_build(provider: str) -> BuildOutcome:
 
     # get a lock on the build directory, making sure there isn't another
     # graph build going on currently
-    with lock_exclusive(build_lock_name(provider)) as acquired:
+    with lock_exclusive(SETTINGS.get_provider_dir(provider)) as acquired:
         if not acquired:
             BUILD_LOGGER.warning("Another graph build holds the build lock, skipping this run.")
             return BuildOutcome.SKIPPED
@@ -219,6 +220,7 @@ def main(argv: List[str] | None = None) -> int:
 
     provider = Providers.OSM.lower()
     SETTINGS.get_provider_dir(provider).mkdir(parents=True, exist_ok=True)
+    create_tables()
 
     if args.once:
         return run_once(provider)

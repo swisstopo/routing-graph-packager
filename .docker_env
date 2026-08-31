@@ -37,6 +37,10 @@ GRAPH_BUILD_CRON=0 3 * * 0
 GRAPH_KEEP_GENERATIONS=1
 # How long to wait for a running packaging job before giving up on a build, in seconds.
 GRAPH_PRUNE_TIMEOUT=3600
+# How long a lock on a graph directory stays valid, in seconds. Nothing renews it, so a builder or
+# a packaging job that dies blocks its directory until this runs out. Keep it shorter than the
+# interval between builds. Default is 4 days.
+GRAPH_LOCK_TTL=345600
 
 USE_ELEVATION=false
 PBF_LOCAL_PATH=/app/tmp_data/planet-latest.osm.pbf

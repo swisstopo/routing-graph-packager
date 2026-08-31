@@ -12,7 +12,7 @@ from sqlmodel import AutoString, DateTime, Field, Relationship, Session, SQLMode
 from routing_packager_app.api_v1.auth import hmac_hash
 
 from ..config import SETTINGS
-from ..constants import Providers, Statuses
+from ..constants import LockMode, Providers, Statuses
 from ..utils.geom_utils import wkbe_to_str
 
 
@@ -62,11 +62,11 @@ class APIKeys(APIKeysBase, table=True):
         if not key:
             return False
         hashed_key = hmac_hash(key)
-        permission_clause = min_permission == APIPermission.READ  
+        permission_clause = min_permission == APIPermission.READ
 
-        if min_permission == APIPermission.READWRITE: 
+        if min_permission == APIPermission.READWRITE:
             permission_clause = or_(APIKeys.permission == "write", APIKeys.permission == "internal")
-        if min_permission == APIPermission.INTERNAL: 
+        if min_permission == APIPermission.INTERNAL:
             permission_clause = APIKeys.permission == "internal"
 
         key_candidate: APIKeys | None = db.exec(
@@ -141,6 +141,22 @@ class Job(JobBase, table=True):
     def convert_bbox(self):
         """Converts a WKBElement to a bbox string"""
         self.bbox = wkbe_to_str(self.bbox)  # type: ignore
+
+
+class GraphLock(SQLModel, table=True):
+    """A lease on a graph directory, held by a builder or a packaging job."""
+
+    __tablename__ = "graph_locks"  # type: ignore
+
+    id: int | None = Field(default=None, primary_key=True)
+    path: str = Field(index=True, nullable=False)
+    mode: LockMode = Field(nullable=False)
+    holder: str = Field(nullable=False)
+    acquired_at: datetime = Field(sa_column=Column(DateTime(), nullable=False))
+    expires_at: datetime = Field(sa_column=Column(DateTime(), nullable=False))
+
+    def __repr__(self):  # pragma: no cover
+        return f"<GraphLock path={self.path} mode={self.mode} holder={self.holder}>"
 
 
 class UserBase(SQLModel):

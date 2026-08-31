@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 from arq import Worker
+from sqlalchemy import delete
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel
@@ -45,12 +46,44 @@ def get_client(get_app: FastAPI) -> TestClient:
 @pytest.fixture(scope="session", autouse=True)
 def create_db():
     from routing_packager_app.api_v1.models import User
-    from routing_packager_app.db import engine
+    from routing_packager_app.db import create_tables, engine
 
-    SQLModel.metadata.create_all(engine, checkfirst=True)
+    create_tables()
     User.add_admin_user(Session(engine))
     yield
     SQLModel.metadata.drop_all(engine, checkfirst=True)
+
+
+@pytest.fixture(scope="function", autouse=True)
+def delete_locks():
+    from routing_packager_app.api_v1.models import GraphLock
+    from routing_packager_app.db import engine
+
+    yield
+    with engine.begin() as conn:
+        conn.execute(delete(GraphLock))
+
+
+@pytest.fixture(scope="function")
+def graph_dirs():
+    """
+    A clean generations directory and graph symlink under ``TMP_DATA_DIR``.
+
+    Locks are named relative to ``TMP_DATA_DIR``, so a graph built somewhere under ``tmp_path``
+    could not be locked at all.
+    """
+    generations = SETTINGS.get_generations_dir()
+    link = SETTINGS.get_graph_link()
+
+    def reset():
+        if link.is_symlink():
+            link.unlink()
+        shutil.rmtree(generations, ignore_errors=True)
+        generations.mkdir(parents=True, exist_ok=True)
+
+    reset()
+    yield generations, link
+    reset()
 
 
 @pytest.fixture(scope="function")

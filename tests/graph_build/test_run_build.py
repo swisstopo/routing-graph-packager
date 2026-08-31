@@ -1,26 +1,22 @@
 import json
 
 import pytest
-from sqlalchemy import text
 
 from routing_packager_app.config import SETTINGS
-from routing_packager_app.constants import BuildOutcome
-from routing_packager_app.db import lock_engine
+from routing_packager_app.constants import BuildOutcome, LockMode
 from routing_packager_app.graph_build import __main__ as graph_build_main
 from routing_packager_app.graph_build.builder import BuildError
 from routing_packager_app.graph_build.status import BUILD_STATUS, EXTERNAL_SCHEDULE, BuildStatus
-from routing_packager_app.utils.lock_utils import build_lock_name, lock_key
+from routing_packager_app.utils.lock_utils import _release, _try_acquire, lock_path
 
 
 @pytest.fixture
 def build_lock_held():
-    holder = lock_engine.connect()
-    holder.execute(text("SELECT pg_advisory_lock(:key)"), {"key": lock_key(build_lock_name("osm"))})
-    holder.commit()
+    lock_id = _try_acquire(lock_path(SETTINGS.get_provider_dir("osm")), LockMode.EXCLUSIVE)
     try:
-        yield holder
+        yield lock_id
     finally:
-        holder.close()
+        _release(lock_id)
 
 
 @pytest.fixture

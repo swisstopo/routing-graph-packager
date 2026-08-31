@@ -5,9 +5,8 @@ import sys
 import threading
 
 import pytest
-from sqlalchemy import text
 
-from routing_packager_app.db import lock_engine
+from routing_packager_app.constants import LockMode
 from routing_packager_app.graph_build import builder
 from routing_packager_app.graph_build.builder import (
     BuildError,
@@ -19,19 +18,11 @@ from routing_packager_app.graph_build.builder import (
     update_pbf,
 )
 from routing_packager_app.utils.lock_utils import (
-    generation_lock_name,
+    _release,
+    _try_acquire,
     lock_generation_shared,
-    lock_key,
+    lock_path,
 )
-
-
-@pytest.fixture
-def graph_dirs(tmp_path):
-    generations = tmp_path.joinpath("generations")
-    generations.mkdir()
-    link = tmp_path.joinpath("graph")
-
-    return generations, link
 
 
 def make_generation(generations, name):
@@ -42,13 +33,8 @@ def make_generation(generations, name):
     return generation
 
 
-def hold_shared_lock(link, generation):
-    key = lock_key(generation_lock_name(link.parent.name, generation.name))
-    holder = lock_engine.connect()
-    holder.execute(text("SELECT pg_advisory_lock_shared(:key)"), {"key": key})
-    holder.commit()
-
-    return holder
+def hold_shared_lock(generation):
+    return _try_acquire(lock_path(generation), LockMode.SHARED)
 
 
 def test_swap_graph_link_repoints(graph_dirs):
@@ -113,12 +99,12 @@ def test_prune_aborts_the_build_when_a_generation_stays_held(graph_dirs):
     current = make_generation(generations, "20260108T000000")
     swap_graph_link(link, current)
 
-    holder = hold_shared_lock(link, old)
+    lock_id = hold_shared_lock(old)
     try:
         with pytest.raises(BuildError, match="still held by a packaging job"):
             prune_generations(generations, link, keep=1, timeout=0.2)
     finally:
-        holder.close()
+        _release(lock_id)
 
     assert old.is_dir()
     assert current.is_dir()
@@ -134,12 +120,9 @@ def test_prune_waits_for_a_reader_to_finish(graph_dirs, monkeypatch):
     current = make_generation(generations, "20260108T000000")
     swap_graph_link(link, current)
 
-    holder = hold_shared_lock(link, old)
-    threading.Timer(0.3, holder.close).start()
-    try:
-        pruned = prune_generations(generations, link, keep=1, timeout=30)
-    finally:
-        holder.close()
+    lock_id = hold_shared_lock(old)
+    threading.Timer(0.3, _release, [lock_id]).start()
+    pruned = prune_generations(generations, link, keep=1, timeout=30)
 
     assert pruned == [old]
     assert not old.exists()
