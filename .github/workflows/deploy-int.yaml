@@ -18,7 +18,7 @@ jobs:
       - name: Set up Docker
         run: |
           docker --version
-          docker-compose --version
+          docker compose version
 
       - name: Generate .docker_env file
         run: |
@@ -57,10 +57,10 @@ jobs:
 
       - name: Pull latest images
         run: |
-          docker-compose pull
+          docker compose pull
 
       - name: Deploy app
         run: |
-          docker-compose down --remove-orphans
-          docker-compose up -d
+          docker compose down --remove-orphans
+          docker compose up -d
           docker image prune -af

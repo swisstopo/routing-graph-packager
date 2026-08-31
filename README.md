@@ -29,10 +29,10 @@ git clone https://github.com/gis-ops/routing-graph-packager.git
 
 Since the graph generation takes place in docker containers, you'll also need to pull the relevant image: `docker pull ghcr.io/gis-ops/docker-valhalla/valhalla:latest`.
 
-The easiest way to quickly start the project is to use `docker-compose`:
+The easiest way to quickly start the project is to use Docker Compose:
 
-```
-docker-compose up -d
+```sh
+docker compose up -d
 ```
 
 With the project defaults, you can now make a `POST` request which will generate a graph package in `DATA_DIR` (default `./data`) from Andorra:

@@ -16,7 +16,7 @@ jobs:
       - name: Set up Docker
         run: |
           docker --version
-          docker-compose --version
+          docker compose version
 
       - name: Generate .docker_env file
         run: |
@@ -39,6 +39,7 @@ jobs:
           GRAPH_BUILD_CRON=${{ vars.GRAPH_BUILD_CRON || '0 3 * * 0' }}
           GRAPH_KEEP_GENERATIONS=${{ vars.GRAPH_KEEP_GENERATIONS || '1' }}
           GRAPH_PRUNE_TIMEOUT=${{ vars.GRAPH_PRUNE_TIMEOUT || '3600' }}
+          GRAPH_LOCK_TTL=${{ vars.GRAPH_LOCK_TTL || '345600' }}
           HTTP_PROXY=${{ vars.HTTP_PROXY }}
           HTTPS_PROXY=${{ vars.HTTPS_PROXY }}
           NO_PROXY=${{ vars.NO_PROXY }}
@@ -53,9 +54,9 @@ jobs:
 
       - name: Pull latest images
         run: |
-          docker-compose pull
+          docker compose pull
 
       - name: Deploy app
         run: |
-          docker-compose down --remove-orphans
-          docker-compose up -d
+          docker compose down --remove-orphans
+          docker compose up -d
