@@ -11,53 +11,55 @@ The default road dataset is the [OSM](openstreetmap.org) planet PBF. If availabl
 
 - **user store**: with basic authentication for `POST` and `DELETE` endpoints
 - **bbox extracts**: generate routing packages within a bounding box
-- **data updater**: includes a daily OSM updater
+- **data updater**: includes a scheduled OSM updater
 - **asynchronous API**: graph generation is outsourced to a [`ARQ`](https://github.com/samuelcolvin/arq) worker
 - **email notifications**: notifies the requesting user if the job succeeded/failed
 - **logs API** read the logs for the worker, the app and the graph builder via the API
 - **api key based authentication**: for reading/creating jobs
 
-## "Quick Start"
-
-The following will download
+## Quick Start
 
 First you need to clone the project:
 
 ```
-git clone https://github.com/gis-ops/routing-graph-packager.git
+git clone git@github.com:swisstopo/routing-graph-packager.git
 ```
 
-Since the graph generation takes place in docker containers, you'll also need to pull the relevant image: `docker pull ghcr.io/gis-ops/docker-valhalla/valhalla:latest`.
-
-The easiest way to quickly start the project is to use Docker Compose:
+The easiest way to quickly start the project locally is to use Docker Compose:
 
 ```sh
-docker compose up -d
+docker compose -f docker-compose.local.yml up -d --build
 ```
 
-With the project defaults, you can now make a `POST` request which will generate a graph package in `DATA_DIR` (default `./data`) from Andorra:
+First, the graph builder needs some time to build the first Valhalla graph. You can check in on the status of the builder using the `api/v1/readyz` end point, a machine readable end point that tells whether the worker is ready to perform packaging work. A 200 HTTP response code means the system is operational, a 503 means it isn't. For more information on readyz and health end points, see further down.
 
-```
+With the project defaults, you can now make a `POST` request which will generate a graph package in `DATA_DIR` (default `./data`) from Albania (or another country if you've edited the compose file):
+
+```bash
 curl --location -XPOST 'http://localhost:5000/api/v1/jobs' \
 --header 'Authorization: Basic YWRtaW5AZXhhbXBsZS5vcmc6YWRtaW4=' \
 --header 'Content-Type: application/json' \
+# "name": needs to be unique for a specific router & provider
+# "bbox": format is minx,miny,maxx,maxy
+# "provider": currently only osm is supported
+# "update": whether this package should be updated on every graph build
 --data-raw '{
-	"name": "test",  # name needs to be unique for a specific router & provider
-	"description": "test descr",
-	"bbox": "1.531906,42.559908,1.6325,42.577608",  # the bbox as minx,miny,maxx,maxy
-	"provider": "osm",  # the dataset provider, needs to be registered in ENABLED_PROVIDERS
-	"update": "true"  # whether this package should be updated on every planet build
+	"name": "test",
+	"description": "my test package,
+	"bbox": "1.531906,42.559908,1.6325,42.577608", 
+	"provider": "osm",
+	"update": "true"
 }'
 ```
 
-After a minute you should have the graph package available in `./data/output/osm_test/`. If not, check the logs of the worker process or the Flask app.
+Shortly after, you should have the graph package available in `./local_data/data/output/osm_test` (format is `{privider}_{name}`.
 
 A separate `routing-packager-graph-build` container runs on the schedule set by `GRAPH_BUILD_CRON`, and on each run:
 
-- downloads a planet PBF (if it doesn't exist) or updates the planet PBF (if it does exist)
-- builds a planet Valhalla graph into a fresh generation directory
+- downloads a PBF (if it doesn't exist yet) or updates the PBF (if it does exist)
+- builds a Valhalla graph into a fresh generation directory
 - atomically points the `graph` symlink at it
-- then queues an update of all graph extracts with a fresh copy
+- then queues an update of all updatable graph extracts with the fresh graph
 
 By default, also a fake SMTP server is started, and you can see incoming messages on `http://localhost:1080`.
 
@@ -65,9 +67,9 @@ By default, also a fake SMTP server is started, and you can see incoming message
 
 ### Graph & OSM updates
 
-The graph build runs in its own container on a schedule you control with `GRAPH_BUILD_CRON` (a standard 5-field cron expression, default `0 3 * * 0` — Sundays at 03:00). Because the build loop sleeps in-process until the next occurrence, two builds can never overlap, however long a planet build takes.
+The graph build runs in its own container on a schedule you control with `GRAPH_BUILD_CRON` (a standard 5-field cron expression, default `0 3 * * 0`: Sundays at 03:00). Because the build loop sleeps in-process until the next occurrence, two builds can never overlap, however long a planet build takes.
 
-Before each build the planet PBF is brought up to date with [`pyosmium-up-to-date`](https://docs.osmcode.org/pyosmium/latest/tools_uptodate.html), which reads the replication server and sequence number straight from the PBF's own osmosis headers.
+Before each build the PBF is brought up to date with [`pyosmium-up-to-date`](https://docs.osmcode.org/pyosmium/latest/tools_uptodate.html), which reads the replication server and sequence number straight from the PBF's own osmosis headers.
 
 #### Graph generations
 
@@ -79,7 +81,7 @@ A failed build simply leaves the symlink alone, so the previous graph keeps serv
 
 Old generations are deleted at the **start** of the next build. On top of that, deletion is guarded with a lock, one per generation: the builder must hold it exclusively before removing a generation, and every worker holds the same lock shared for as long as it is packaging tiles from it. A second lock, one per provider, admits a single graph build at a time.
 
-The locks live in Postgres instead of on the filesystem, so the builder does not have to share a machine with the workers. Each one is a row in `graph_locks`, keyed on the directory it protects relative to `$TMP_DATA_DIR`.
+The locks live in Postgres, so the builder does not have to share a machine with the workers.
 
 In order to avoid deadlocks on failed graph builds, there is a lock expiry `GRAPH_LOCK_TTL` seconds after a lock was taken, and expired rows are cleaned up by the next lock taken on anything. Note that `GRAPH_LOCK_TTL` has to be shorter than the interval between builds. In the meantime the state is plain SQL:
 
@@ -89,7 +91,7 @@ SELECT path, mode, holder, expires_at FROM graph_locks;
 
 and a lock that is stuck is a `DELETE` away.
 
-Pruning has to finish *before* the build starts, since the build itself adds one more tile set to disk. If a generation is still being packaged, the builder waits up to `GRAPH_PRUNE_TIMEOUT` seconds for that job to finish. If it is still held after that, the build is aborted. An aborted build leaves the current graph serving and the next scheduled run tries again.
+Pruning of graphs is done *before* the build starts, so there are at most 2 full graphs on disk at any time. If a generation is still being packaged, the builder waits up to `GRAPH_PRUNE_TIMEOUT` seconds for that job to finish. If it is still held after that, the build is aborted. An aborted build leaves the current graph serving and the next scheduled run tries again.
 
 #### Running the build from an external scheduler
 
@@ -99,7 +101,7 @@ The builder normally loops in-process on `GRAPH_BUILD_CRON`, which is what the d
 args: ["graph-build", "--once"]
 ```
 
-`GRAPH_BUILD_CRON` is not read in this mode, and does not need to be valid. The builder has no way of knowing what the external scheduler was configured with, so it does not guess: `build.next_build_at` in the health report reads `externally_controlled` instead of a timestamp.
+`GRAPH_BUILD_CRON` is not read in this mode, and does not need to be valid. The builder has no way of knowing what the external scheduler was configured with, so it does not guess: `build.next_build_at` in the `/api/v1/health` report reads `externally_controlled` instead of a timestamp.
 
 | Exit code | Meaning |
 |---|---|
@@ -148,43 +150,33 @@ The app is listening on `/api/v1/jobs` for new `POST` requests to generate some 
 
 ### Logs
 
-The app exposes logs via the route `/api/v1/logs/{log_type}`. Available log types are `worker`, `app` and `builder`. The `builder` log holds the full output of `valhalla_build_tiles` and the PBF update, not just the build loop's own messages. Every line coming from a subprocess is tagged with its source — `[VALHALLA]` for all of Valhalla's binaries, `[WGET]` and `[PYOSMIUM-UP-TO-DATE]` for the others — so `grep '\[VALHALLA\]'` isolates a tile build, and `grep -v '\['` leaves the build loop's own messages. The graph builder additionally logs to stdout, so `docker logs routing-packager-graph-build` works too. An optional query parameter `?lines={n}` limits the output to the last `n` lines. Authentication is required.
+The app exposes logs via the route `/api/v1/logs/{log_type}`. Available log types are `worker`, `app` and `builder`. 
+
+The `builder` log holds the full output of `valhalla_build_tiles` and the PBF update, not just the build loop's own messages. Every line coming from a subprocess is tagged: `[VALHALLA]` for all of Valhalla's binaries, `[WGET]` and `[PYOSMIUM-UP-TO-DATE]` for the others, so `grep '\[VALHALLA\]'` isolates a tile build, and `grep -v '\['` leaves the builders own messages. The graph builder additionally logs to stdout, so `docker logs routing-packager-graph-build` works too. An optional query parameter `?lines={n}` limits the output to the last `n` lines. Authentication is required.
 
 All three log files rotate at 10 MB and keep 10 archives. The endpoint always serves the live file.
 
 ### Readiness
 
-`GET /api/v1/readyz` answers whether this app instance can take packaging jobs. It needs **no authentication**, and the status code carries the whole signal:
+`GET /api/v1/readyz` answers whether this app instance can take packaging jobs. It needs **no authentication**, and the status code is all that matters:
 
 | Code | Meaning |
 |---|---|
 | `200` | `{"ready": true}` |
 | `503` | `{"ready": false}` |
 
-It checks the four things the app itself needs to turn a submitted job into a queued one: a graph exists behind the symlink, Postgres answers, Redis answers, and the output directory is writable. A fresh deployment therefore reads `503` until the first graph build has finished.
+It checks the four things the app itself needs to turn a submitted job into a queued one: 
 
-Two things it deliberately does not check:
+1. a graph exists behind the symlink
+2. Postgres answers
+3. Redis answers,
+4. the output directory is writable. 
 
-  - **Whether a worker is alive.** That belongs to the worker's container. Failing readiness here would pull the HTTP API out of its service, so nobody could even call `/api/v1/jobs/{id}` to find out why their job was stuck. Use `/api/v1/health` for that.
-  - **Whether a build is running.** A build writes into a fresh generation and leaves the current one serving until it swaps the symlink, so packaging is unaffected.
-
-The body is one bit on purpose. When it says `false`, `/api/v1/health` says which of the four it was.
-
-This is what the image's `HEALTHCHECK` uses, and it is what a Kubernetes `readinessProbe` should point at:
-
-```yaml
-readinessProbe:
-  httpGet:
-    path: /api/v1/readyz
-    port: 5000
-  periodSeconds: 10
-```
-
-Do **not** point a `livenessProbe` at it. Liveness restarts the container, so a brief Postgres outage would restart every pod at once and turn a short outage into a long one. Readiness only stops traffic, and recovers on its own.
+A fresh deployment therefore reads `503` until the first graph build has finished.
 
 ### Health
 
-`GET /api/v1/health` reports the graph being served, what the graph builder is doing, and whether the backing services are reachable. **Authentication is required** — basic auth or an `internal` API key. This is a breaking change: the endpoint used to answer anyone.
+`GET /api/v1/health` reports the graph being served, what the graph builder is doing, and whether the backing services are reachable. **Authentication is required**: basic auth or an `internal` API key. 
 
 ```json
 {
@@ -213,7 +205,7 @@ Do **not** point a `livenessProbe` at it. Liveness restarts the container, so a 
     "redis": {"up": true, "error": null},
     "worker": {
       "up": false,
-      "last_report": "Aug-25 11:41:20",
+      "last_report": "Aug-21 11:41:20",
       "queued": 2,
       "ongoing": 0,
       "complete": 41,
@@ -224,7 +216,7 @@ Do **not** point a `livenessProbe` at it. Liveness restarts the container, so a 
 }
 ```
 
-`status` is `ok` when a graph is available and Postgres, Redis and the worker are all up, `degraded` otherwise. Note the endpoint answers `200` either way — it is a diagnostic view for a human, not a probe. `/api/v1/readyz` is the one that signals through the status code.
+`status` is `ok` when a graph is available and Postgres, Redis and the worker are all up, `degraded` otherwise. The endpoint answers `200` either way. `/api/v1/readyz` signals through the status code.
 
 #### `graph`
 
@@ -245,7 +237,7 @@ Read from `$TMP_DATA_DIR/<provider>/build_status.json`, which the graph build co
 
 #### `services`
 
-Postgres is checked with a `SELECT 1`, Redis with a `PING`. The worker's entry comes from the health-check key ARQ's worker maintains. `"up": false` means the worker either stopped or has been unresponsive for more than a minute. `queued` is read live from the job queue.
+Postgres is checked with a `SELECT 1`, Redis with a `PING`. The worker's entry comes from the health-check key ARQ uses. `"up": false` means the worker either stopped or has been unresponsive for more than a minute. `queued` is read live from the job queue.
 
 ### Authentication and Authorization 
 
