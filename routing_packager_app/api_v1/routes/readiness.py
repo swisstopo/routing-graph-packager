@@ -1,19 +1,7 @@
 """
-Answers whether this app instance should be sent packaging work.
+Tells the caller whether this app instance should be sent packaging work by means of the reponse code.
 
-The question a readiness probe asks is "should traffic reach this pod", so the checks here are scoped
-to what the app container itself needs to turn a submitted job into a queued one that a worker can
-finish: a graph to package from, the database holding jobs and locks, the queue to enqueue onto, and
-somewhere to write the package.
-
-Two things are deliberately *not* checked. Whether a worker is alive belongs to the worker's own
-container: failing readiness here would pull the HTTP API out of its service, so nobody could even ask
-why their job was stuck. And a graph build in progress is not a problem at all, because a build writes
-into a fresh generation and leaves the current one serving until it swaps the symlink.
-
-``/api/v1/health`` is the other half of this: authenticated, detailed, and always 200. It reports the
-worker, the build, and which of these checks failed. This endpoint is the machine-readable signal, so
-it carries everything in the status code and gives an anonymous caller a single bit.
+The more machine-readable and publicly accessible variant of ``/health``.
 """
 
 import os
@@ -39,7 +27,7 @@ def _graph_ready() -> bool:
 
 def _postgres_ready(db: Session) -> bool:
     try:
-        db.execute(text("SELECT 1"))
+        db.exec(text("SELECT 1"))
     except Exception:
         return False
 
@@ -68,9 +56,6 @@ def _output_ready() -> bool:
 async def get_readiness(req: Request, db: Session = Depends(get_db)) -> Any:
     """
     Reports whether this instance can take packaging jobs.
-
-    Public on purpose: a probe has no good way to send credentials, and the body is a single bit the
-    caller could infer from the status code anyway.
 
     :returns: 200 while ready, 503 otherwise.
     """

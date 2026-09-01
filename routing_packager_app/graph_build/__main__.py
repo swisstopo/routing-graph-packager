@@ -27,7 +27,7 @@ from .builder import (
     write_build_meta,
 )
 
-SLEEP_CHUNK = 30
+SLEEP_CHUNK = 30  # can be interrupted every 30 seconds
 
 EXIT_OK = 0
 EXIT_FAILED = 1

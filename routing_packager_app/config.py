@@ -68,10 +68,6 @@ class BaseSettings(_BaseSettings):
     def _ignore_empty_env_vars(cls, data):
         """
         Falls back to the defaults for env vars that are set but empty.
-
-        The deploy workflows render every variable into .docker_env unconditionally, so an
-        unset GitHub variable arrives as an empty string and would otherwise either override a
-        good default or fail parsing outright.
         """
         if isinstance(data, dict):
             return {k: v for k, v in data.items() if v != ""}
@@ -142,7 +138,7 @@ class BaseSettings(_BaseSettings):
 
     def get_logging_dir(self) -> Path:
         """
-        Gets the path where logs are stored for both worker and builder/app
+        Gets the path where logs are stored for the worker, the graph builder and the app
         """
         tmp_data_dir = self.TMP_DATA_DIR
         if os.path.isdir("/app") and not os.getenv("CI", None):  # pragma: no cover

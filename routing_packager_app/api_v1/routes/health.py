@@ -28,7 +28,6 @@ def _is_admin(auth: HTTPBasicCredentials | None) -> bool:
     """
     Checks the basic auth credentials against the configured admin without touching the database.
 
-    ``User.add_admin_user`` creates the admin from the environment at startup.
     It exists so that the endpoint can still answer, and report
     the database as down.
 
@@ -93,7 +92,7 @@ def _postgres_report(db: Session) -> Dict[str, Any]:
     Minimal postgres smoke test.
     """
     try:
-        db.execute(text("SELECT 1"))
+        db.exec(text("SELECT 1"))
     except Exception as e:
         return {"up": False, "error": str(e)}
 

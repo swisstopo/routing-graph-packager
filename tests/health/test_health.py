@@ -136,7 +136,7 @@ def test_answers_with_the_admin_credentials_while_postgres_is_down(
     def explode(*args, **kwargs):
         raise ConnectionError("could not connect to server")
 
-    monkeypatch.setattr("routing_packager_app.api_v1.routes.health.Session.execute", explode)
+    monkeypatch.setattr("routing_packager_app.api_v1.routes.health.Session.exec", explode)
     monkeypatch.setattr("routing_packager_app.api_v1.routes.health.APIKeys.check_key", explode)
     res = get_client.get("/api/v1/health", headers=basic_auth_header)
 

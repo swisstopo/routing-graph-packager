@@ -17,14 +17,14 @@ def create_tables() -> None:
 
     All three containers call this, not just the app: the worker and the graph builder both need
     ``graph_locks`` before they can take a lock, and neither waits for the app to have started.
-    Two of them starting at once can collide on the same ``CREATE``, which is harmless as long as
-    the table exists afterwards.
     """
+
+    # SQLModel creates all tables in scope automatically
     from .api_v1 import models  # noqa: F401
 
     try:
         SQLModel.metadata.create_all(engine, checkfirst=True)
-    except ProgrammingError:
+    except ProgrammingError:  # retry once
         SQLModel.metadata.create_all(engine, checkfirst=True)
 
 

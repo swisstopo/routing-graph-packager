@@ -77,17 +77,17 @@ Every build writes into a **new** directory, `$TMP_DATA_DIR/osm/generations/<tim
 
 A failed build simply leaves the symlink alone, so the previous graph keeps serving packages.
 
-Old generations are deleted at the **start** of the next build rather than the end, so anything still holding the previous generation has had a full cron interval to finish. On top of that, deletion is guarded with a lock, one per generation: the builder must hold it exclusively before removing a generation, and every worker holds the same lock shared for as long as it is packaging tiles from it. A second lock, one per provider, admits a single graph build at a time.
+Old generations are deleted at the **start** of the next build. On top of that, deletion is guarded with a lock, one per generation: the builder must hold it exclusively before removing a generation, and every worker holds the same lock shared for as long as it is packaging tiles from it. A second lock, one per provider, admits a single graph build at a time.
 
-The locks live in Postgres rather than on the filesystem, so the builder does not have to share a machine with the workers. Each one is a row in `graph_locks`, keyed on the directory it protects relative to `$TMP_DATA_DIR`. A row rather than a session-level advisory lock, because the build lock is held for the length of a planet build and nothing should have to keep a database connection open for hours to represent it. Locks therefore survive a database restart and the death of the process that took them.
+The locks live in Postgres instead of on the filesystem, so the builder does not have to share a machine with the workers. Each one is a row in `graph_locks`, keyed on the directory it protects relative to `$TMP_DATA_DIR`.
 
-What keeps a dead holder from blocking a directory forever is a lease: every row expires `GRAPH_LOCK_TTL` seconds after it was taken, and expired rows are cleaned up by the next lock taken on anything. Nothing renews a lease, which is why `GRAPH_LOCK_TTL` has to be shorter than the interval between builds — with the default weekly cron, a builder killed mid-build costs one build rather than jamming the schedule. In the meantime the state is plain SQL:
+In order to avoid deadlocks on failed graph builds, there is a lock expiry `GRAPH_LOCK_TTL` seconds after a lock was taken, and expired rows are cleaned up by the next lock taken on anything. Note that `GRAPH_LOCK_TTL` has to be shorter than the interval between builds. In the meantime the state is plain SQL:
 
 ```sql
 SELECT path, mode, holder, expires_at FROM graph_locks;
 ```
 
-and a lock that is genuinely stuck is a `DELETE` away.
+and a lock that is stuck is a `DELETE` away.
 
 Pruning has to finish *before* the build starts, since the build itself adds one more tile set to disk. If a generation is still being packaged, the builder waits up to `GRAPH_PRUNE_TIMEOUT` seconds for that job to finish. If it is still held after that, the build is aborted. An aborted build leaves the current graph serving and the next scheduled run tries again.
 
@@ -130,7 +130,7 @@ Because 75 is non-zero, a scheduler that retries on failure will retry a run tha
 
 This service tries to be flexible in terms of data sources and routing engines. Consequently, we support proprietary dataset such as from TomTom or HERE.
 
-However, all data sources **must be** in the OSM PBF format and follow the OSM tagging model. There is [commercial support](https://github.com/gis-ops/prop2osm) in case of interest.
+However, all data sources **must be** in the OSM PBF format and follow the OSM tagging model. 
 
 ### `POST` new job
 

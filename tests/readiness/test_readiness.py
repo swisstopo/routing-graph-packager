@@ -52,7 +52,7 @@ def test_not_ready_when_postgres_is_down(get_client: TestClient, graph, monkeypa
     def explode(*args, **kwargs):
         raise RuntimeError("could not connect to server")
 
-    monkeypatch.setattr("routing_packager_app.api_v1.routes.readiness.Session.execute", explode)
+    monkeypatch.setattr("routing_packager_app.api_v1.routes.readiness.Session.exec", explode)
 
     assert get_client.get(URL).status_code == 503
 

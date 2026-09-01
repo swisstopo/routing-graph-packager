@@ -1,21 +1,8 @@
 """
-Fences the graph build against the packaging jobs with rows in ``graph_locks``.
+Protects ongoing packaging jobs against a new graph build with rows in ``graph_locks``.
 
 The builder and the workers coordinate over two things only: the ``graph`` symlink, which says which
-generation is current, and the locks in here, which say which generations are being read. Neither
-needs the two to share a machine, so the builder can run wherever it has the shared volume and the
-database in reach.
-
-A lock is a row, not a connection. Every operation here is a short transaction: a build that runs for
-hours holds nothing open, and the lock survives a database restart, a dropped connection and the death
-of the process that took it. What keeps a dead holder from blocking a resource forever is the lease —
-every row carries an ``expires_at`` of ``GRAPH_LOCK_TTL`` seconds, and expired rows are deleted by the
-next acquire. Nothing renews a lease, so ``GRAPH_LOCK_TTL`` has to be shorter than the interval between
-builds, and the one real cost of the design is that a crashed holder blocks its resource until the
-lease runs out. A stuck lock is visible in ``SELECT * FROM graph_locks`` and cleared with a ``DELETE``.
-
-Every timestamp comes from Postgres rather than from Python, because the builder's clock and the
-workers' are not the same clock.
+generation is current, and the locks in here, which say which generations are being read.
 """
 
 import os
@@ -34,7 +21,7 @@ from ..constants import LockMode
 from ..db import engine
 
 LOCK_POLL_INTERVAL = 5.0
-SHARED_LOCK_TIMEOUT = 300.0
+SHARED_LOCK_TIMEOUT = 300.0  # 5 minutes
 RESOLVE_ATTEMPTS = 2
 
 
@@ -43,9 +30,7 @@ def lock_path(path: Path) -> str:
     Turns a directory into the string identifying its lock.
 
     The path is stored relative to ``TMP_DATA_DIR`` so that two processes mounting the volume in
-    different places still name the same directory the same way. An absolute path would make the
-    builder's ``/app/tmp_data/osm`` and a worker's ``/srv/tmp_data/osm`` look like two locks, and the
-    fence would silently never engage.
+    different places still name the same directory the same way.
 
     :param path: the directory being locked.
 
@@ -66,10 +51,7 @@ def _try_acquire(path: str, mode: LockMode) -> int | None:
     """
     Takes a lock on a path, or reports that somebody else holds it.
 
-    The table lock is what makes this atomic. Looking for a conflict and then inserting are two
-    statements, and without serialising them a shared and an exclusive acquire can both find nothing
-    and both insert, which is the pruner deleting a directory out from under a running packaging job.
-    It is held for the few milliseconds this transaction lasts, over a table with a handful of rows.
+    This is a single atomic operation by means of an exclusive lock on the graph locks table.
 
     :param path: the lock's path, from :func:`lock_path`.
     :param mode: shared locks admit each other, an exclusive lock admits nobody.
@@ -155,11 +137,6 @@ def lock_generation_shared(link: Path, timeout: float = SHARED_LOCK_TIMEOUT) -> 
     Several workers can hold this at once; only the pruner, which needs the path exclusively before
     deleting, is kept out. Holding it guarantees the resolved directory survives for as long as the
     caller reads from it.
-
-    Resolving and locking are two separate steps, so the generation can in principle be pruned in
-    between. Re-resolving the symlink afterwards is what rules that out: if it still points at the
-    generation we locked, that generation is the current one and therefore never a prune candidate.
-    If it moved, a whole build finished in the gap, and resolving again lands on its result.
 
     :param link: the graph symlink, e.g. tmp_data/osm/graph.
     :param timeout: how many seconds to wait for a pruner to release the generation.

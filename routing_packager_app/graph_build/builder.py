@@ -45,9 +45,8 @@ def _log_tag(cmd: List[str]) -> str:
     """
     Builds the marker every line of a subprocess' output is prefixed with.
 
-    Valhalla's binaries all share one ``[VALHALLA]`` tag so that a whole tile build can be
-    grepped out of ``builder.log`` in one go, separate from the build loop's own messages. The
-    other tools we shell out to get their own name rather than being mislabelled.
+    Valhalla's binaries all share one ``[VALHALLA]`` tag to make grep'ing easier,
+    separate from the build loop's own messages.
 
     :param cmd: the command about to run.
     """
@@ -67,8 +66,11 @@ def terminate_current() -> None:
     SIGKILLing it once the grace period runs out.
     """
     process = _current
+
+    # poll() checks whether the process has already terminated
     if process is not None and process.poll() is None:
         BUILD_LOGGER.info(f"Terminating {' '.join(process.args)}.")
+        # sends SIGTERM
         process.terminate()
 
 

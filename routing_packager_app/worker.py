@@ -160,7 +160,7 @@ def _sort_jobs(jobs_: Sequence[Job]) -> List[Job]:
 
 async def update_all_packages(ctx):
     """
-    Re-creates every package from the current graph generation.
+    Recreates every package from the current graph generation.
 
     Enqueued by the graph build container after it swapped in a new generation. Packages are
     rebuilt in place, sequentially, largest bbox first.
@@ -219,5 +219,5 @@ class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(SETTINGS.REDIS_URL)
     on_startup = startup
     functions = [create_package, update_all_packages]
-    job_timeout = 60 * 60 * 24
+    job_timeout = 60 * 60 * 24  # 24 hours
     health_check_interval = 60
