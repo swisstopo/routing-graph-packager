@@ -37,6 +37,9 @@ async def create_package(
     user_id: int | None,
     update: bool = False,
 ):
+    """
+    Packages the tiles intersecting a bounding box into a ZIP.
+    """
     session: Session = next(get_db())
 
     # Set up the logger where we have access to the user email
@@ -76,6 +79,8 @@ async def create_package(
         #   https://arq-docs.helpmanual.io/#synchronous-jobs
 
         graph_link = SETTINGS.get_graph_link()
+        # exit stack is used to wrap the contextmanager entry
+        # in a try/except
         stack = ExitStack()
         try:
             current_valhalla_dir = stack.enter_context(lock_generation_shared(graph_link))
@@ -85,6 +90,7 @@ async def create_package(
                 f"No graph available behind {graph_link}, check the graph build container's logs ({e}).",
             )
 
+        # no exception, so we can enter the context
         with stack:
             LOGGER.info(f"Packaging from graph generation {current_valhalla_dir.name}", extra=log_extra)
             valhalla_tiles = sorted(current_valhalla_dir.rglob("*.gph"))
@@ -112,14 +118,17 @@ async def create_package(
         with open(os.path.join(dirname, fname_sanitized + ".json"), "w", encoding="utf8") as f:
             json.dump(j, f, indent=2, ensure_ascii=False)
 
+        action = "Updated" if update else "Created"
         LOGGER.info(
-            f"Job {job_id} by {user_email} finished successfully. Find the new dataset in {zip_path}",
+            f"Job {job_id} by {user_email} finished successfully. {action} the dataset in {zip_path}",
             extra=log_extra,
         )
         succeeded = True
     # catch all exceptions we're controlling
     except HTTPException as e:
-        LOGGER.critical(f"Job {job.name} failed with\n'{e.detail}'", extra=log_extra)
+        action = "Updating" if update else "Creating"
+        kept = " The previous package was kept." if update else ""
+        LOGGER.critical(f"{action} job {job.name} failed with\n'{e.detail}'{kept}", extra=log_extra)
         raise e
     # any other exception is assumed to be a deleted job and will only be logged/email sent
     except Exception:  # pragma: no cover
@@ -129,8 +138,12 @@ async def create_package(
     finally:
         final_status = Statuses.COMPLETED
         if not succeeded:
-            shutil.rmtree(os.path.dirname(zip_path))
             final_status = Statuses.FAILED
+
+            # only remove zip if this job tried to create it,
+            # otherwise leave it around
+            if not update:
+                shutil.rmtree(os.path.dirname(zip_path), ignore_errors=True)
 
         # always write the "last_finished" column
         job.last_finished = datetime.now(timezone.utc)

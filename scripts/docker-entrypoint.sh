@@ -3,7 +3,9 @@
 cmd=${1}
 
 if [ "${cmd}" == 'worker' ]; then
-  exec /app/app_venv/bin/arq routing_packager_app.worker.WorkerSettings
+  exec /app/app_venv/bin/arq \
+    --custom-log-dict routing_packager_app.logger.ARQ_LOGGING_CONFIG \
+    routing_packager_app.worker.WorkerSettings
 elif [ "${cmd}" == 'graph-build' ]; then
   shift
   exec /app/app_venv/bin/python -m routing_packager_app.graph_build "$@"

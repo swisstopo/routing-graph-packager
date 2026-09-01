@@ -80,3 +80,48 @@ async def test_fail_no_tiles_in_bbox(get_client: TestClient, basic_auth_header, 
 
     assert e.value.status_code == 404
     assert "No Valhalla tiles in bbox" in e.value.detail
+
+
+@pytest.mark.asyncio
+async def test_failed_update_keeps_the_existing_package(get_client: TestClient, basic_auth_header):
+    new_job = create_new_job(get_client, DEFAULT_ARGS, basic_auth_header)
+    shutil.rmtree(Path(new_job.json()["zip_path"]).parent)
+    params = create_package_params(new_job.json())
+    previous = Path(params[5]).parent
+    previous.joinpath("osm_test.zip").write_bytes(b"the package from the last build")
+
+    with pytest.raises(HTTPException):
+        await create_package(*params, True)
+
+    assert previous.is_dir()
+    assert previous.joinpath("osm_test.zip").read_bytes() == b"the package from the last build"
+
+
+@pytest.mark.asyncio
+async def test_failed_creation_removes_the_partial_package(
+    get_client: TestClient, basic_auth_header
+):
+    new_job = create_new_job(get_client, DEFAULT_ARGS, basic_auth_header)
+    shutil.rmtree(Path(new_job.json()["zip_path"]).parent)
+    params = create_package_params(new_job.json())
+    partial = Path(params[5]).parent
+
+    with pytest.raises(HTTPException):
+        await create_package(*params, False)
+
+    assert not partial.exists()
+
+
+@pytest.mark.asyncio
+async def test_a_missing_output_directory_does_not_mask_the_failure(
+    get_client: TestClient, basic_auth_header
+):
+    new_job = create_new_job(get_client, DEFAULT_ARGS, basic_auth_header)
+    shutil.rmtree(Path(new_job.json()["zip_path"]).parent)
+    params = create_package_params(new_job.json())
+    shutil.rmtree(Path(params[5]).parent)
+
+    with pytest.raises(HTTPException) as e:
+        await create_package(*params, False)
+
+    assert e.value.status_code == 500

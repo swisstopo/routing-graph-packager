@@ -141,6 +141,16 @@ LOGGING_CONFIG = {
     },
 }
 
+# show Arq logs in the worker logs
+ARQ_LOGGING_CONFIG = {
+    **LOGGING_CONFIG,
+    "loggers": {
+        **LOGGING_CONFIG["loggers"],
+        "arq": {"level": "INFO", "handlers": ["worker"], "propagate": True},
+    },
+}
+
+
 config.dictConfig(LOGGING_CONFIG)
 LOGGER = logging.getLogger("worker")
 BUILD_LOGGER = logging.getLogger("builder")
