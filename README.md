@@ -263,7 +263,7 @@ Both compose files ship a collector (`statsd-exporter`), a time series database 
 docker compose -f docker-compose.local.yml up -d
 ```
 
-Grafana is then on [`localhost:3000`](http://localhost:3000) with the dashboard already provisioned, Prometheus on `localhost:9090`. The `statsd-exporter` in between is not published to the host: it listens on 8125/udp inside the private network only.
+Grafana is then on [`localhost:3000`](http://localhost:3000) with two dashboards already provisioned, Prometheus on `localhost:9090`. **Routing Graph Packager** covers requests, packaging and build outcomes; **Valhalla Tile Build** breaks a graph build down by stage. The `statsd-exporter` in between is not published to the host: it listens on 8125/udp inside the private network only.
 
 In `docker-compose.yml` the same three services sit behind the `monitoring` profile, so a deployment that does not want them is unaffected:
 
@@ -288,6 +288,21 @@ Scraped from the app and the worker:
 | `rgp_http_duration_seconds` | histogram | `method`, `endpoint` |
 | `rgp_package_total` | counter | `outcome`, `update` |
 | `rgp_package_duration_seconds` | histogram | `update` |
+| `rgp_graph_build_state` | gauge | `state` |
+| `rgp_graph_build_stage` | gauge | `stage` |
+| `rgp_graph_build_next_timestamp_seconds` | gauge | — |
+| `rgp_worker_queued` | gauge | — |
+| `rgp_worker_in_progress` | gauge | — |
+| `rgp_worker_ongoing` | gauge | — |
+| `rgp_worker_jobs_complete_total` / `_failed_total` / `_retried_total` | counter | — |
+
+The last six describe the builder and the worker but are published by the **app**, because the app is the component that can read both sources when a scrape arrives: `build_status.json` on the shared volume, and ARQ's health key in Redis. They are the same numbers `/api/v1/health` reports, and they read correctly whether or not the builder is currently running — including under `--once`, where the builder has already exited.
+
+`rgp_graph_build_state` and `rgp_graph_build_stage` are the conventional Prometheus enum: a series per possible value, `1` on the current one and `0` on the rest, so `rgp_graph_build_stage{stage="building_tiles"} == 1` works as an alert expression. Every stage reads `0` when no build is running. `rgp_graph_build_next_timestamp_seconds` is absent, rather than zero, when the builder runs under an external scheduler and reports `externally_controlled`.
+
+A job stays on the queue until it finishes, so `rgp_worker_queued` counts waiting and running jobs together — `rgp_worker_queued - rgp_worker_in_progress` is the number actually waiting for capacity. A worker killed mid-job leaves its in-progress lock behind, and ARQ will not retry that job until the lock expires `job_timeout` seconds later, which `worker.py` sets to 24 hours. Until then it counts as queued and claimed while `rgp_worker_ongoing` reads 0 — that combination is the signature of an orphaned job.
+
+ARQ writes a single health key per queue, so the worker counters would describe only the last worker to report if a second one were ever added. There is one `worker` service in both compose files and nothing that scales it, so today they are simply correct.
 
 Pushed by the builder and by Valhalla, and mapped to Prometheus names in `monitoring/statsd_mapping.yml`:
 
@@ -300,7 +315,9 @@ Pushed by the builder and by Valhalla, and mapped to Prometheus names in `monito
 
 `update` distinguishes a package a user asked for (`false`) from one re-zipped by `update_all_packages` after a graph swap (`true`).
 
-The last row is Valhalla's. `valhalla_build_tiles` times every one of its own stages and reports them itself; all the builder does is write a `statsd` block into each generation's `valhalla.json`, which it does whenever `STATSD_HOST` is set. Those are the same numbers the `[TIMING]` lines in the build log carry. The stages the builder owns — pruning, the PBF download and update, the symlink swap — are the ones Valhalla knows nothing about, and they arrive as `rgp.build.stage.duration` instead.
+Valhalla's stages, in the order it runs them, are `initialize`, `parseways`, `parserelations`, `parsenodes`, `constructedges`, `build`, `enhance`, `filter`, `transit`, `validate` and `cleanup`. The builder invokes `valhalla_build_tiles` twice, `initialize` through `build` and then `enhance` through `cleanup`, with the elevation download in between, so all of them arrive under the same metric.
+
+`valhalla_build_tiles` times every one of its own stages and reports them itself; all the builder does is write a `statsd` block into each generation's `valhalla.json`, which it does whenever `STATSD_HOST` is set. Those are the same numbers the `[TIMING]` lines in the build log carry. The stages the builder owns — pruning, the PBF download and update, the symlink swap — are the ones Valhalla knows nothing about, and they arrive as `rgp.build.stage.duration` instead.
 
 `monitoring/statsd_mapping.yml` only has to cover what is still pushed. It gives the build timers histogram buckets that suit their scale, hours rather than the seconds a default bucket set assumes, and folds the three outcome counters into one `rgp_build_total{outcome=...}`. Metrics matching no rule are still exported under a name derived from the StatsD one, so a missing rule loses the tuning, not the data. The scraped metrics need none of this: their buckets are declared in `routing_packager_app/metrics.py`, in seconds, where they can be read next to the code that fills them.
 

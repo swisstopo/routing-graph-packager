@@ -228,8 +228,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (stage) (valhalla_build_stage_duration_seconds_sum) / sum by (stage) (valhalla_build_stage_duration_seconds_count)",
-          "legendFormat": "valhalla {{stage}}",
+          "expr": "valhalla_build_stage_duration_seconds{module!=\"util\"}",
+          "legendFormat": "valhalla {{module}}.{{stage}}",
           "instant": true,
           "range": false
         }
@@ -322,6 +322,295 @@
           "expr": "sum(rate(rgp_build_duration_seconds_sum{outcome=\"succeeded\"}[30d])) / sum(rate(rgp_build_duration_seconds_count{outcome=\"succeeded\"}[30d]))",
           "instant": true,
           "range": false
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "state-timeline",
+      "title": "Graph build stage",
+      "description": "Which step the builder is on, over time. Every row reads idle when no build is running. A row that stays lit is a stage that is taking a long time, which on a planet build is normal for building_tiles.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "rowHeight": 0.9,
+        "alignValue": "center",
+        "legend": {
+          "displayMode": "hidden"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "idle",
+                  "color": "transparent",
+                  "index": 0
+                },
+                "1": {
+                  "text": "running",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+          "expr": "rgp_graph_build_stage",
+          "legendFormat": "{{stage}}",
+          "interval": "1m"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Build state",
+      "description": "idle between builds, building during one, failed when the last one gave up, unknown before the builder has ever run.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 12,
+        "y": 24
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "name",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+          "expr": "rgp_graph_build_state == 1",
+          "legendFormat": "{{state}}",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Next build in",
+      "description": "Counts down to the next GRAPH_BUILD_CRON occurrence. Blank while a build is running, and blank when the builder runs with --once, since something outside it owns the schedule.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 18,
+        "y": 24
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+          "expr": "rgp_graph_build_next_timestamp_seconds - time()",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Worker queue",
+      "description": "queued counts everything on the queue; claimed is how many have an in-progress lock; waiting is the difference. claimed staying high while ongoing reads 0 means a worker died mid-job and its lock has not expired yet.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+          "expr": "rgp_worker_queued",
+          "legendFormat": "queued",
+          "interval": "1m"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+          "expr": "rgp_worker_ongoing",
+          "legendFormat": "ongoing",
+          "interval": "1m"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rgp_worker_in_progress",
+          "legendFormat": "claimed",
+          "interval": "1m"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rgp_worker_queued - rgp_worker_in_progress",
+          "legendFormat": "waiting",
+          "interval": "1m"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Worker jobs",
+      "description": "Jobs the worker finished per bar, as ARQ counts them. These are the worker's own totals, so they reset when it restarts.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+          "expr": "increase(rgp_worker_jobs_complete_total[$__interval])",
+          "legendFormat": "complete",
+          "interval": "1m"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+          "expr": "increase(rgp_worker_jobs_failed_total[$__interval])",
+          "legendFormat": "failed",
+          "interval": "1m"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+          "expr": "increase(rgp_worker_jobs_retried_total[$__interval])",
+          "legendFormat": "retried",
+          "interval": "1m"
         }
       ]
     }

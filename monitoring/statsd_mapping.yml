@@ -16,10 +16,8 @@ mappings:
     labels:
       outcome: "$1"
 
-  - match: valhalla.mjolnir.timing.*
+  - match: valhalla.mjolnir.timing.*.*
     name: valhalla_build_stage_duration_seconds
     labels:
-      stage: "$1"
-    timer_type: histogram
-    histogram_options:
-      buckets: [10, 60, 300, 900, 1800, 3600, 7200, 14400, 28800, 57600]
+      module: "$1"
+      stage: "$2"

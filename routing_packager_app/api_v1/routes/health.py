@@ -3,7 +3,7 @@ from hmac import compare_digest
 from typing import Any, Dict
 
 from arq.connections import ArqRedis
-from arq.constants import default_queue_name, health_check_key_suffix
+from arq.constants import default_queue_name
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBasicCredentials
@@ -15,13 +15,11 @@ from ..auth import BasicAuth, HeaderKey
 from ...config import SETTINGS
 from ...constants import BuildState
 from ...db import get_db
+from ...metrics import WORKER_HEALTH_KEY, parse_worker_health
 from ..models import APIKeys, APIPermission, User
 from ...utils.file_utils import resolve_graph
 
 router = APIRouter()
-
-# uses the default health key directly from arq
-WORKER_HEALTH_KEY = default_queue_name + health_check_key_suffix
 
 
 def _is_admin(auth: HTTPBasicCredentials | None) -> bool:
@@ -99,40 +97,6 @@ def _postgres_report(db: Session) -> Dict[str, Any]:
     return {"up": True, "error": None}
 
 
-def _parse_worker_health(raw: bytes) -> Dict[str, Any]:
-    """
-    Pulls the counters out of the health check string ARQ's worker writes.
-
-    The value looks like this:
-
-        ``Aug-25 11:41:20 j_complete=0 j_failed=0 j_retried=0 j_ongoing=0
-    queued=0``
-
-    :param raw: the health check key's value.
-    """
-    # split into tokens by space
-    fields = raw.decode(errors="replace").split()
-
-    # get the counter values
-    counters = dict(field.split("=", 1) for field in fields if "=" in field)
-
-    def number(name: str) -> int | None:
-        try:
-            return int(counters[name])
-        except (KeyError, ValueError):
-            return None
-
-    return {
-        # TODO: the date and time format might be an implementation detail
-        # that could change underneath our feet in the future
-        "last_report": " ".join(field for field in fields if "=" not in field) or None,
-        "ongoing": number("j_ongoing"),
-        "complete": number("j_complete"),
-        "failed": number("j_failed"),
-        "retried": number("j_retried"),
-    }
-
-
 async def _services_report(db: Session, pool: ArqRedis | None) -> Dict[str, Any]:
     """
     Report health of redis and postgres
@@ -165,7 +129,7 @@ async def _services_report(db: Session, pool: ArqRedis | None) -> Dict[str, Any]
         # set
         worker["queued"] = await pool.zcard(default_queue_name)
         if raw:
-            worker.update(_parse_worker_health(raw), up=True)
+            worker.update(parse_worker_health(raw), up=True)
     except Exception:
         pass
 
