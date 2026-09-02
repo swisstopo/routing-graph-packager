@@ -21,7 +21,7 @@ from .db import create_tables, get_db
 from .api_v1.models import User, Job
 from .constants import Statuses
 from .logger import AppSmtpHandler, get_smtp_details, LOGGER
-from .metrics import METRICS
+from .metrics import PACKAGE_DURATION, PACKAGES, start_metrics_server
 from .utils.file_utils import make_zip
 from .utils.lock_utils import lock_generation_shared
 from .utils.geom_utils import wkbe_to_geom, wkbe_to_str
@@ -152,9 +152,9 @@ async def create_package(
         job.status = final_status
         session.commit()
 
-        tags = [f"update:{str(update).lower()}"]
-        METRICS.timing("package.duration", (time.perf_counter() - started) * 1000, tags=tags)
-        METRICS.increment("package.succeeded" if succeeded else "package.failed", tags=tags)
+        updated = str(update).lower()
+        PACKAGE_DURATION.labels(update=updated).observe(time.perf_counter() - started)
+        PACKAGES.labels(outcome="succeeded" if succeeded else "failed", update=updated).inc()
 
 
 def _sort_jobs(jobs_: Sequence[Job]) -> List[Job]:
@@ -228,6 +228,7 @@ async def update_all_packages(ctx):
 
 async def startup(ctx):
     create_tables()
+    start_metrics_server()
 
 
 class WorkerSettings:

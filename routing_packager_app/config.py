@@ -54,6 +54,7 @@ class BaseSettings(_BaseSettings):
     REDIS_URL: str = "redis://localhost"
 
     # MONITORING ###
+    METRICS_PORT: int = 9101
     STATSD_HOST: str = ""
     STATSD_PORT: int = 8125
     STATSD_PREFIX: str = "rgp"

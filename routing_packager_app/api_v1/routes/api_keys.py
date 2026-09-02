@@ -100,7 +100,7 @@ def get_key(
 
 
 @router.patch("/{key_id}", response_model=APIKeysRead)
-def modify_key(
+def patch_key(
     key_id,
     key_update: APIKeysUpdate,
     db: Session = Depends(get_db),
@@ -131,7 +131,7 @@ def modify_key(
 
 
 @router.delete("/{key_id}")
-def delete_user(key_id, db: Session = Depends(get_db), auth: HTTPBasicCredentials = Depends(BasicAuth)):
+def delete_key(key_id, db: Session = Depends(get_db), auth: HTTPBasicCredentials = Depends(BasicAuth)):
     # first authenticate
     req_user = User.get_user(db, auth)
     if not req_user:

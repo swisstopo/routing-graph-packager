@@ -17,7 +17,7 @@ from pathlib import Path
 
 from ..config import SETTINGS
 from ..constants import BuildStage, BuildState
-from ..metrics import METRICS
+from ..metrics import STATSD
 
 HEARTBEAT_INTERVAL = 10.0
 EXTERNAL_SCHEDULE = "externally_controlled"
@@ -52,7 +52,7 @@ class BuildStatus:
         if self._stage_started is None:
             return
 
-        METRICS.timing(
+        STATSD.timing(
             "build.stage.duration",
             (time.monotonic() - self._stage_started) * 1000,
             tags=[f"stage:{self._data['stage']}"],

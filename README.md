@@ -242,13 +242,20 @@ Postgres is checked with a `SELECT 1`, Redis with a `PING`. The worker's entry c
 
 ### Monitoring
 
-The app, the worker and the graph builder emit [StatsD](https://github.com/statsd/statsd) over UDP, and so does Valhalla. Metrics are off until `STATSD_HOST` is set; nothing else changes, and a collector that is down or unreachable only ever costs a dropped packet.
+Metrics reach Prometheus two different ways, because the components are not alike.
+
+**The app and the worker are scraped.** Both are long lived, so Prometheus pulls from them directly. Each process is its own scrape target, which means its metrics carry an `instance` label, the `up` metric says whether it is alive, and restarting one of them leaves the other's counters alone. The app serves `/metrics` on its own port; the worker has no HTTP surface of its own, so it starts a small server on `METRICS_PORT`.
+
+**The graph builder pushes StatsD.** Prometheus pulls, and a `--once` build is a batch process that exits the instant after it records its result, which is exactly what a scrape would miss. The builder also runs Valhalla, which speaks [StatsD](https://github.com/statsd/statsd) and nothing else. Both send UDP to `statsd-exporter`, which Prometheus scrapes. Pull for services, push for batch.
 
 | Variable | Default | Description |
 |---|---|---|
-| `STATSD_HOST` | (empty) | Where to send metrics. Empty disables them entirely |
+| `METRICS_PORT` | `9101` | Port the worker serves `/metrics` on. `0` leaves it unscrapeable |
+| `STATSD_HOST` | (empty) | Where the builder and Valhalla send metrics. Empty disables them |
 | `STATSD_PORT` | `8125` | The collector's UDP port |
-| `STATSD_PREFIX` | `rgp` | Prefixed to every metric this app sends. Valhalla's own metrics always use `valhalla` |
+| `STATSD_PREFIX` | `rgp` | Prefixed to the builder's metrics. Valhalla's own always use `valhalla` |
+
+`STATSD_HOST` no longer affects the app or the worker. Their `/metrics` endpoints are always served, which costs nothing when nobody scrapes them.
 
 Both compose files ship a collector (`statsd-exporter`), a time series database (`prometheus`) and a dashboard (`grafana`). The local stack starts them along with everything else:
 
@@ -264,26 +271,38 @@ In `docker-compose.yml` the same three services sit behind the `monitoring` prof
 docker compose --profile monitoring up -d
 ```
 
-Set `STATSD_HOST=statsd-exporter` in your `.env` when you enable the profile, and leave it unset when you do not. Pointing the app at a collector that is not running costs nothing but a dropped packet — and a warning line per metric, which gets loud.
+Set `STATSD_HOST=statsd-exporter` in your `.env` when you enable the profile, and leave it unset when you do not. Pointing the builder at a collector that is not running costs nothing but a dropped packet — and a warning line per metric, which gets loud.
+
+Two things to know before scaling anything:
+
+- **`/metrics` is unauthenticated**, which is the convention, but `docker-compose.yml` publishes the app on 443. Nothing secret is in there, though endpoint names, request rates and latencies are. Gate it behind `BasicAuth` if that matters to you.
+- **`gunicorn.py` sets `workers = 1`.** Raising it gives each worker process its own metric registry, and scrapes would land on whichever one answers. That needs `prometheus_client`'s multiprocess mode.
 
 #### What is measured
 
-| Metric | Type | Tags |
-|---|---|---|
-| `rgp.http.requests` | counter | `method`, `endpoint`, `status` |
-| `rgp.http.duration` | timer | `method`, `endpoint` |
-| `rgp.package.duration` | timer | `update` |
-| `rgp.package.succeeded` / `.failed` | counter | `update` |
-| `rgp.build.duration` | timer | `outcome` |
-| `rgp.build.succeeded` / `.failed` / `.skipped` | counter | — |
-| `rgp.build.stage.duration` | timer | `stage` |
-| `valhalla.mjolnir.timing.*` | timer | `provider` |
+Scraped from the app and the worker:
 
-`endpoint` names the handler that ran, e.g. `jobs.get_job`, rather than the requested path, so job ids cannot each grow their own time series. It carries its module because two handlers share a name.
+| Metric | Type | Labels |
+|---|---|---|
+| `rgp_http_requests_total` | counter | `method`, `endpoint`, `status` |
+| `rgp_http_duration_seconds` | histogram | `method`, `endpoint` |
+| `rgp_package_total` | counter | `outcome`, `update` |
+| `rgp_package_duration_seconds` | histogram | `update` |
+
+Pushed by the builder and by Valhalla, and mapped to Prometheus names in `monitoring/statsd_mapping.yml`:
+
+| Metric | Becomes | Labels |
+|---|---|---|
+| `rgp.build.duration` | `rgp_build_duration_seconds` | `outcome` |
+| `rgp.build.succeeded` / `.failed` / `.skipped` | `rgp_build_total` | `outcome` |
+| `rgp.build.stage.duration` | `rgp_build_stage_duration_seconds` | `stage` |
+| `valhalla.mjolnir.timing.*` | `valhalla_build_stage_duration_seconds` | `stage`, `provider` |
+
+`update` distinguishes a package a user asked for (`false`) from one re-zipped by `update_all_packages` after a graph swap (`true`).
 
 The last row is Valhalla's. `valhalla_build_tiles` times every one of its own stages and reports them itself; all the builder does is write a `statsd` block into each generation's `valhalla.json`, which it does whenever `STATSD_HOST` is set. Those are the same numbers the `[TIMING]` lines in the build log carry. The stages the builder owns — pruning, the PBF download and update, the symlink swap — are the ones Valhalla knows nothing about, and they arrive as `rgp.build.stage.duration` instead.
 
-`monitoring/statsd_mapping.yml` is where the dotted metric names turn into Prometheus ones: it gives each timer histogram buckets that suit its scale, since HTTP latency is measured in milliseconds and a planet build in hours, and folds the outcome counters into a single `rgp_build_total{outcome=...}` and `rgp_package_total{outcome=...}`. Metrics that match no rule are still exported, under a name derived from the StatsD one, so a missing rule loses nothing but the tuning.
+`monitoring/statsd_mapping.yml` only has to cover what is still pushed. It gives the build timers histogram buckets that suit their scale, hours rather than the seconds a default bucket set assumes, and folds the three outcome counters into one `rgp_build_total{outcome=...}`. Metrics matching no rule are still exported under a name derived from the StatsD one, so a missing rule loses the tuning, not the data. The scraped metrics need none of this: their buckets are declared in `routing_packager_app/metrics.py`, in seconds, where they can be read next to the code that fills them.
 
 ### Authentication and Authorization 
 

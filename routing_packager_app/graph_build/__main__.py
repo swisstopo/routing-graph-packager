@@ -14,7 +14,7 @@ from ..config import SETTINGS
 from ..constants import BuildOutcome, Providers
 from ..db import create_tables
 from ..logger import BUILD_LOGGER
-from ..metrics import METRICS
+from ..metrics import STATSD
 from ..utils.lock_utils import lock_exclusive
 from .status import BUILD_STATUS, EXTERNAL_SCHEDULE
 from .builder import (
@@ -114,10 +114,10 @@ def run_build(provider: str) -> BuildOutcome:
         BUILD_STATUS.idle()
         outcome = "succeeded"
     finally:
-        METRICS.timing(
+        STATSD.timing(
             "build.duration", (time.perf_counter() - started) * 1000, tags=[f"outcome:{outcome}"]
         )
-        METRICS.increment(f"build.{outcome}")
+        STATSD.increment(f"build.{outcome}")
 
     # the build ran, so its time to re-create
     # existing packages with the new data

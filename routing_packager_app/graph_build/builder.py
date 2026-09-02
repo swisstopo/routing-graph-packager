@@ -21,7 +21,7 @@ from typing import List, TextIO
 from ..config import SETTINGS
 from ..constants import BuildStage
 from ..logger import BUILD_LOGGER
-from ..metrics import METRICS_ENABLED
+from ..metrics import STATSD_ENABLED
 from ..utils.lock_utils import lock_exclusive
 from .status import BUILD_STATUS
 
@@ -123,7 +123,7 @@ def _statsd_options(provider: str) -> List[str]:
 
     :returns: the flags to append, or nothing at all when metrics are off.
     """
-    if not METRICS_ENABLED:
+    if not STATSD_ENABLED:
         return []
 
     return [
