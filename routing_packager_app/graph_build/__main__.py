@@ -14,6 +14,7 @@ from ..config import SETTINGS
 from ..constants import BuildOutcome, Providers
 from ..db import create_tables
 from ..logger import BUILD_LOGGER
+from ..metrics import METRICS
 from ..utils.lock_utils import lock_exclusive
 from .status import BUILD_STATUS, EXTERNAL_SCHEDULE
 from .builder import (
@@ -82,30 +83,41 @@ def run_build(provider: str) -> BuildOutcome:
     generations_dir.mkdir(parents=True, exist_ok=True)
     pbf = SETTINGS.get_pbf_path()
 
-    # get a lock on the build directory, making sure there isn't another
-    # graph build going on currently
-    with lock_exclusive(SETTINGS.get_provider_dir(provider)) as acquired:
-        if not acquired:
-            BUILD_LOGGER.warning("Another graph build holds the build lock, skipping this run.")
-            return BuildOutcome.SKIPPED
+    started = time.perf_counter()
+    outcome = "failed"
 
-        prune_generations(
-            generations_dir,
-            link,
-            SETTINGS.GRAPH_KEEP_GENERATIONS,
-            SETTINGS.GRAPH_PRUNE_TIMEOUT,
+    try:
+        # get a lock on the build directory, making sure there isn't another
+        # graph build going on currently
+        with lock_exclusive(SETTINGS.get_provider_dir(provider)) as acquired:
+            if not acquired:
+                BUILD_LOGGER.warning("Another graph build holds the build lock, skipping this run.")
+                outcome = "skipped"
+                return BuildOutcome.SKIPPED
+
+            prune_generations(
+                generations_dir,
+                link,
+                SETTINGS.GRAPH_KEEP_GENERATIONS,
+                SETTINGS.GRAPH_PRUNE_TIMEOUT,
+            )
+
+            if not pbf.is_file():
+                download_pbf(pbf)
+            else:
+                update_pbf(pbf)
+
+            generation = build_graph(generations_dir, pbf)
+            write_build_meta(generation, pbf)
+            swap_graph_link(link, generation)
+
+        BUILD_STATUS.idle()
+        outcome = "succeeded"
+    finally:
+        METRICS.timing(
+            "build.duration", (time.perf_counter() - started) * 1000, tags=[f"outcome:{outcome}"]
         )
-
-        if not pbf.is_file():
-            download_pbf(pbf)
-        else:
-            update_pbf(pbf)
-
-        generation = build_graph(generations_dir, pbf)
-        write_build_meta(generation, pbf)
-        swap_graph_link(link, generation)
-
-    BUILD_STATUS.idle()
+        METRICS.increment(f"build.{outcome}")
 
     # the build ran, so its time to re-create
     # existing packages with the new data

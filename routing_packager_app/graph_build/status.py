@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ..config import SETTINGS
 from ..constants import BuildStage, BuildState
+from ..metrics import METRICS
 
 HEARTBEAT_INTERVAL = 10.0
 EXTERNAL_SCHEDULE = "externally_controlled"
@@ -30,6 +31,7 @@ class BuildStatus:
     def __init__(self, path: Path):
         self.path = path
         self._last_heartbeat = 0.0
+        self._stage_started: float | None = None
         self._data = {
             "state": BuildState.UNKNOWN.value,
             "stage": None,
@@ -40,12 +42,32 @@ class BuildStatus:
             "last_error": None,
         }
 
+    def _close_stage(self) -> None:
+        """
+        Reports how long the stage that just ended took, if one was running.
+
+        Valhalla times its own tile build stages, so what this adds are the stages it knows nothing
+        about: pruning, and the PBF download and update.
+        """
+        if self._stage_started is None:
+            return
+
+        METRICS.timing(
+            "build.stage.duration",
+            (time.monotonic() - self._stage_started) * 1000,
+            tags=[f"stage:{self._data['stage']}"],
+        )
+        self._stage_started = None
+
     def stage(self, stage: BuildStage) -> None:
         """
         Records that the build moved on to ``stage``.
 
         :param stage: the step the builder is about to start.
         """
+        self._close_stage()
+        self._stage_started = time.monotonic()
+
         if self._data["state"] != BuildState.BUILDING.value:
             self._data["started_at"] = _now()
             self._data["last_error"] = None
@@ -85,6 +107,8 @@ class BuildStatus:
             schedule, :data:`EXTERNAL_SCHEDULE` where something outside it does, and ``None`` where
             it is simply unknown.
         """
+        self._close_stage()
+
         if isinstance(next_build_at, datetime):
             next_build_at = next_build_at.isoformat()
 
@@ -99,6 +123,7 @@ class BuildStatus:
 
         :param error: the message to surface to an operator.
         """
+        self._close_stage()
         self._data["state"] = BuildState.FAILED.value
         self._data["last_error"] = error
         self._write()

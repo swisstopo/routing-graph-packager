@@ -16,6 +16,7 @@ dependencies = [
     "arq>=0.28.0",
     "bump-pydantic>=0.8.0",
     "croniter>=6.2.4",
+    "datadog>=0.53.0",
     "fastapi>=0.141.1",
     "geoalchemy2>=0.20.0",
     "gunicorn>=26.2.0",

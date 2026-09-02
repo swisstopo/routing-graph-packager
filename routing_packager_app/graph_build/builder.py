@@ -21,6 +21,7 @@ from typing import List, TextIO
 from ..config import SETTINGS
 from ..constants import BuildStage
 from ..logger import BUILD_LOGGER
+from ..metrics import METRICS_ENABLED
 from ..utils.lock_utils import lock_exclusive
 from .status import BUILD_STATUS
 
@@ -108,6 +109,33 @@ def _valhalla_version() -> str:
         return (out.stdout or out.stderr).strip() or "unknown"
     except (OSError, subprocess.SubprocessError):
         return "unknown"
+
+
+def _statsd_options(provider: str) -> List[str]:
+    """
+    Builds the flags that point Valhalla's own metrics at our collector.
+
+    ``valhalla_build_tiles`` reports a timer per build stage, ``mjolnir.timing.<stage>``, the same
+    numbers it prints as ``[TIMING]``. It only sends them if the config it is given names a statsd
+    host, which is what these flags write into the generation's ``valhalla.json``.
+
+    :param provider: the dataset provider being built, sent as a tag.
+
+    :returns: the flags to append, or nothing at all when metrics are off.
+    """
+    if not METRICS_ENABLED:
+        return []
+
+    return [
+        "--statsd-host",
+        SETTINGS.STATSD_HOST,
+        "--statsd-port",
+        str(SETTINGS.STATSD_PORT),
+        "--statsd-prefix",
+        "valhalla",
+        "--statsd-tags",
+        f"provider:{provider}",
+    ]
 
 
 def _remove_generation(generation: Path) -> Path:
@@ -262,27 +290,27 @@ def build_graph(generations_dir: Path, pbf: Path) -> Path:
 
     config_path = generation.joinpath("valhalla.json")
     BUILD_LOGGER.info(f"Building valhalla.json in {generation}")
+    config_cmd = [
+        _binary("valhalla_build_config"),
+        "--mjolnir-tile-extract",
+        "",
+        "--mjolnir-tile-dir",
+        str(generation),
+        "--additional-data-elevation",
+        str(elevation_dir),
+        "--mjolnir-concurrency",
+        str(SETTINGS.CONCURRENCY),
+        "--mjolnir-max-cache-size",
+        str(SETTINGS.MAX_CACHE_SIZE),
+        "--logging-type",
+        "std_out",
+        "--logging-color",
+        "false",
+    ]
+    config_cmd += _statsd_options(generations_dir.parent.name)
+
     with open(config_path, "w") as fh:
-        _run(
-            [
-                _binary("valhalla_build_config"),
-                "--mjolnir-tile-extract",
-                "",
-                "--mjolnir-tile-dir",
-                str(generation),
-                "--additional-data-elevation",
-                str(elevation_dir),
-                "--mjolnir-concurrency",
-                str(SETTINGS.CONCURRENCY),
-                "--mjolnir-max-cache-size",
-                str(SETTINGS.MAX_CACHE_SIZE),
-                "--logging-type",
-                "std_out",
-                "--logging-color",
-                "false",
-            ],
-            stdout=fh,
-        )
+        _run(config_cmd, stdout=fh)
 
     _run([
         _binary("valhalla_build_tiles"),

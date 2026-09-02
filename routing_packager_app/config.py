@@ -53,6 +53,11 @@ class BaseSettings(_BaseSettings):
     POSTGRES_PASS: str = "docker"
     REDIS_URL: str = "redis://localhost"
 
+    # MONITORING ###
+    STATSD_HOST: str = ""
+    STATSD_PORT: int = 8125
+    STATSD_PREFIX: str = "rgp"
+
     # SMTP ###
     SMTP_HOST: str = "localhost"
     SMTP_PORT: int = 1025

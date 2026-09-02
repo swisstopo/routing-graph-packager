@@ -7,6 +7,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from pathlib import Path
 
 from .config import SETTINGS
+from .metrics import METRICS_ENABLED, MetricsMiddleware
 
 
 def create_app(lifespan: Optional[Lifespan[FastAPI]]):
@@ -36,6 +37,8 @@ def register_router(app: FastAPI):
 def register_middlewares(app: FastAPI):
     # only from 1kb we'll do gzipping
     app.add_middleware(GZipMiddleware, minimum_size=1000)
+    if METRICS_ENABLED:
+        app.add_middleware(MetricsMiddleware)
     if SETTINGS.CORS_ORIGINS:
         app.add_middleware(
             CORSMiddleware,

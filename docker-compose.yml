@@ -1,5 +1,6 @@
 volumes:
   postgis-data:
+  prometheus-data:
   packages: # do not change any detail of this volume
     driver: local
     driver_opts:
@@ -118,4 +119,51 @@ services:
       - 1080:1080
     networks:
       - routing-packager
+    restart: always
+  statsd-exporter:
+    image: prom/statsd-exporter:v0.28.0
+    container_name: routing-packager-statsd-exporter
+    profiles: [monitoring]
+    command:
+      - --statsd.mapping-config=/etc/statsd/mapping.yml
+      - --statsd.listen-udp=:8125
+      - --statsd.parse-dogstatsd-tags
+      - --web.listen-address=:9102
+    volumes:
+      - $PWD/monitoring/statsd_mapping.yml:/etc/statsd/mapping.yml:ro
+    networks:
+      - routing-packager
+    restart: always
+  prometheus:
+    image: prom/prometheus:v3.6.0
+    container_name: routing-packager-prometheus
+    profiles: [monitoring]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=90d
+    volumes:
+      - $PWD/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - routing-packager
+    depends_on:
+      - statsd-exporter
+    restart: always
+  grafana:
+    image: grafana/grafana:12.2.0
+    container_name: routing-packager-grafana
+    profiles: [monitoring]
+    ports:
+      - 3000:3000
+    env_file:
+      - .docker_env
+      - .env
+    volumes:
+      - $PWD/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - $PWD/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - routing-packager
+    depends_on:
+      - prometheus
     restart: always

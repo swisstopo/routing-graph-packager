@@ -21,6 +21,7 @@ from .db import create_tables, get_db
 from .api_v1.models import User, Job
 from .constants import Statuses
 from .logger import AppSmtpHandler, get_smtp_details, LOGGER
+from .metrics import METRICS
 from .utils.file_utils import make_zip
 from .utils.lock_utils import lock_generation_shared
 from .utils.geom_utils import wkbe_to_geom, wkbe_to_str
@@ -73,6 +74,7 @@ async def create_package(
     job.last_started = datetime.now(timezone.utc)
     session.commit()
 
+    started = time.perf_counter()
     succeeded = False
     try:
         # TODO: gzipping is synchronous, maybe follow
@@ -149,6 +151,10 @@ async def create_package(
         job.last_finished = datetime.now(timezone.utc)
         job.status = final_status
         session.commit()
+
+        tags = [f"update:{str(update).lower()}"]
+        METRICS.timing("package.duration", (time.perf_counter() - started) * 1000, tags=tags)
+        METRICS.increment("package.succeeded" if succeeded else "package.failed", tags=tags)
 
 
 def _sort_jobs(jobs_: Sequence[Job]) -> List[Job]:

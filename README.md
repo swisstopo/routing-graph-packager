@@ -16,6 +16,7 @@ The default road dataset is the [OSM](openstreetmap.org) planet PBF. If availabl
 - **email notifications**: notifies the requesting user if the job succeeded/failed
 - **logs API** read the logs for the worker, the app and the graph builder via the API
 - **api key based authentication**: for reading/creating jobs
+- **metrics**: StatsD out of the app and out of Valhalla itself, with a Prometheus/Grafana stack in the compose file
 
 ## Quick Start
 
@@ -238,6 +239,51 @@ Read from `$TMP_DATA_DIR/<provider>/build_status.json`, which the graph build co
 #### `services`
 
 Postgres is checked with a `SELECT 1`, Redis with a `PING`. The worker's entry comes from the health-check key ARQ uses. `"up": false` means the worker either stopped or has been unresponsive for more than a minute. `queued` is read live from the job queue.
+
+### Monitoring
+
+The app, the worker and the graph builder emit [StatsD](https://github.com/statsd/statsd) over UDP, and so does Valhalla. Metrics are off until `STATSD_HOST` is set; nothing else changes, and a collector that is down or unreachable only ever costs a dropped packet.
+
+| Variable | Default | Description |
+|---|---|---|
+| `STATSD_HOST` | (empty) | Where to send metrics. Empty disables them entirely |
+| `STATSD_PORT` | `8125` | The collector's UDP port |
+| `STATSD_PREFIX` | `rgp` | Prefixed to every metric this app sends. Valhalla's own metrics always use `valhalla` |
+
+Both compose files ship a collector (`statsd-exporter`), a time series database (`prometheus`) and a dashboard (`grafana`). The local stack starts them along with everything else:
+
+```bash
+docker compose -f docker-compose.local.yml up -d
+```
+
+Grafana is then on [`localhost:3000`](http://localhost:3000) with the dashboard already provisioned, Prometheus on `localhost:9090`. The `statsd-exporter` in between is not published to the host: it listens on 8125/udp inside the private network only.
+
+In `docker-compose.yml` the same three services sit behind the `monitoring` profile, so a deployment that does not want them is unaffected:
+
+```bash
+docker compose --profile monitoring up -d
+```
+
+Set `STATSD_HOST=statsd-exporter` in your `.env` when you enable the profile, and leave it unset when you do not. Pointing the app at a collector that is not running costs nothing but a dropped packet — and a warning line per metric, which gets loud.
+
+#### What is measured
+
+| Metric | Type | Tags |
+|---|---|---|
+| `rgp.http.requests` | counter | `method`, `endpoint`, `status` |
+| `rgp.http.duration` | timer | `method`, `endpoint` |
+| `rgp.package.duration` | timer | `update` |
+| `rgp.package.succeeded` / `.failed` | counter | `update` |
+| `rgp.build.duration` | timer | `outcome` |
+| `rgp.build.succeeded` / `.failed` / `.skipped` | counter | — |
+| `rgp.build.stage.duration` | timer | `stage` |
+| `valhalla.mjolnir.timing.*` | timer | `provider` |
+
+`endpoint` names the handler that ran, e.g. `jobs.get_job`, rather than the requested path, so job ids cannot each grow their own time series. It carries its module because two handlers share a name.
+
+The last row is Valhalla's. `valhalla_build_tiles` times every one of its own stages and reports them itself; all the builder does is write a `statsd` block into each generation's `valhalla.json`, which it does whenever `STATSD_HOST` is set. Those are the same numbers the `[TIMING]` lines in the build log carry. The stages the builder owns — pruning, the PBF download and update, the symlink swap — are the ones Valhalla knows nothing about, and they arrive as `rgp.build.stage.duration` instead.
+
+`monitoring/statsd_mapping.yml` is where the dotted metric names turn into Prometheus ones: it gives each timer histogram buckets that suit its scale, since HTTP latency is measured in milliseconds and a planet build in hours, and folds the outcome counters into a single `rgp_build_total{outcome=...}` and `rgp_package_total{outcome=...}`. Metrics that match no rule are still exported, under a name derived from the StatsD one, so a missing rule loses nothing but the tuning.
 
 ### Authentication and Authorization 
 
