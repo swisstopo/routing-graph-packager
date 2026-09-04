@@ -32,9 +32,6 @@ MAX_CACHE_SIZE=1000000000
 
 # When to build a new graph, standard 5-field cron. Default is Sundays at 03:00.
 GRAPH_BUILD_CRON=0 3 * * 0
-# How many graph generations to keep on disk. 1 means only the one currently served,
-# so a build transiently needs room for two planet graphs.
-GRAPH_KEEP_GENERATIONS=1
 # How long to wait for a running packaging job before giving up on a build, in seconds.
 GRAPH_PRUNE_TIMEOUT=3600
 # How long a lock on a graph directory stays valid, in seconds. Keep it shorter than the

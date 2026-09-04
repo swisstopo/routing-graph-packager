@@ -117,9 +117,8 @@ Because 75 is non-zero, a scheduler that retries on failure will retry a run tha
 | Variable | Default | Description |
 |---|---|---|
 | `GRAPH_BUILD_CRON` | `0 3 * * 0` | When to build, standard 5-field cron |
-| `GRAPH_KEEP_GENERATIONS` | `1` | How many graph generations to keep when pruning |
 | `GRAPH_PRUNE_TIMEOUT` | `3600` | Seconds to wait for a packaging job before aborting the build |
-| `GRAPH_LOCK_TTL` | `345600` | Seconds a lock on a graph directory stays valid. Nothing renews it, so keep it shorter than the interval between builds |
+| `GRAPH_LOCK_TTL` | `345600` | Seconds a lock on a graph directory stays valid. A graph build that failed can only keep the graph locked up to this many seconds. |
 | `PBF_URL` | planet.openstreetmap.org | Where to download the PBF from if it is missing |
 | `PBF_LOCAL_PATH` | `$TMP_DATA_DIR/planet-latest.osm.pbf` | Where the PBF lives |
 | `PBF_FORCE_UPDATE` | `false` | Pass `--force-update-of-old-planet`, needed for a very stale PBF |
@@ -148,6 +147,83 @@ The app is listening on `/api/v1/jobs` for new `POST` requests to generate some 
      - Zip graph tiles from disk according to the request's bounding box and put the package to `$DATA_DIR/output/<JOB_NAME>`, along with a metadata JSON
    - **busy**, the current job will be put in the queue and will be processed once it reaches the queue's head
 4. Send an email to the requesting user with success or failure notice (including the error message)
+
+### Authentication and Authorization 
+
+The REST API supports two methods of authentication: basic auth and api keys. 
+
+#### Basic Auth 
+
+Rather than a full fledged user management system, this method provides access to all routes for an admin user. 
+
+
+#### API Keys 
+
+For all non-admin users, access to either reading or reading and creating jobs can be granted by the admin user via issuing API keys. These keys can be created with a specific permission and validity duration in days. Furthermore, they can be annotated with comments. Finally, they can be revoked and their permissions and validity changed at any given time.
+
+> **Note**: For security reasons, keys are not stored directly in the database. Instead, their hashes are stored. This means the raw key is only available once in the response of the key creation request. Afterwards, you will only be able to retrieve the hashed key, which is not usable for authentication. 
+
+##### Examples 
+
+###### Creating a new key 
+
+```
+curl --location -XPOST 'http://localhost:5000/api/v1/keys' \
+--header 'Authorization: Basic <encoded_auth>' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+	"permission": "read",  # read, write or internal (for reading logs)
+	"validity_days": 90,
+	"comment": "issued to client XY"  # supports arbitrary comments
+}'
+```
+
+The created key is returned as part of the response. Make sure to store the key, since this will be the only time it is accessible directly. In the DB, only its hash is stored. 
+
+
+###### Retrieving a key 
+
+Keys can either be found through their ID: 
+
+```
+curl --location -XPOST 'http://localhost:5000/api/v1/keys/<id>' \
+--header 'Authorization: Basic <encoded_auth>' 
+```
+
+or using query parameters: 
+
+```
+curl --location -XPOST 'http://localhost:5000/api/v1/keys/?comment="client xy"' \
+--header 'Authorization: Basic <encoded_auth>' 
+```
+
+```
+curl --location -XPOST 'http://localhost:5000/api/v1/keys/?is_active=true'\
+--header 'Authorization: Basic <encoded_auth>' 
+```
+
+###### Revoking a key 
+
+Keys can be modified through PATCH requests: 
+
+```
+curl --location -XPATCH 'http://localhost:5000/api/v1/keys' \
+--header 'Authorization: Basic <encoded_auth>' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+	"is_active": false 
+}'
+```
+
+This method also allows changing a key's validity, comment or permission.
+
+###### Passing a key 
+
+When reading or creating jobs, you can pass an API key instead of a basic auth header like this: 
+
+```
+curl --location -XGET 'http://localhost:443/api/v1/jobs' --header 'x-api-key: H_I99kW7qqMATr5SGYTLAQ' --header 'Content-Type: application/json'
+```
 
 ### Logs
 
@@ -242,11 +318,11 @@ Postgres is checked with a `SELECT 1`, Redis with a `PING`. The worker's entry c
 
 ### Monitoring
 
-Metrics reach Prometheus two different ways, because the components are not alike.
+Prometheus is used for application level monitoring for all three services: 
 
-**The app and the worker are scraped.** Both are long lived, so Prometheus pulls from them directly. Each process is its own scrape target, which means its metrics carry an `instance` label, the `up` metric says whether it is alive, and restarting one of them leaves the other's counters alone. The app serves `/metrics` on its own port; the worker has no HTTP surface of its own, so it starts a small server on `METRICS_PORT`.
-
-**The graph builder pushes StatsD.** Prometheus pulls, and a `--once` build is a batch process that exits the instant after it records its result, which is exactly what a scrape would miss. The builder also runs Valhalla, which speaks [StatsD](https://github.com/statsd/statsd) and nothing else. Both send UDP to `statsd-exporter`, which Prometheus scrapes. Pull for services, push for batch.
+  - **HTTP API**: exposes its own public `/metrics` router that presents metrics collected via a small ASGI middleware 
+  - **Worker**: runs its own minimal HTTP API with only a `/metrics` route in a background thread
+  - **Graph Builder**: pushes [StatsD](https://github.com/statsd/statsd) messages. The reason for that is that the graph build might be externally controlled via k8s in the future, so it is not guaranteed to be a long running process. Also, the valhalla graph build itself publishes StatsD, so both can share a single exporter that exposes to Prometheus.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -255,146 +331,16 @@ Metrics reach Prometheus two different ways, because the components are not alik
 | `STATSD_PORT` | `8125` | The collector's UDP port |
 | `STATSD_PREFIX` | `rgp` | Prefixed to the builder's metrics. Valhalla's own always use `valhalla` |
 
-`STATSD_HOST` no longer affects the app or the worker. Their `/metrics` endpoints are always served, which costs nothing when nobody scrapes them.
+The docker compose setups ship a `statsd-exporter`, a `prometheus` instance and a `grafana` dashboard. 
 
-Both compose files ship a collector (`statsd-exporter`), a time series database (`prometheus`) and a dashboard (`grafana`). The local stack starts them along with everything else:
+Grafana is then on [`localhost:3000`](http://localhost:3000).
 
-```bash
-docker compose -f docker-compose.local.yml up -d
-```
-
-Grafana is then on [`localhost:3000`](http://localhost:3000) with two dashboards already provisioned, Prometheus on `localhost:9090`. **Routing Graph Packager** covers requests, packaging and build outcomes; **Valhalla Tile Build** breaks a graph build down by stage. The `statsd-exporter` in between is not published to the host: it listens on 8125/udp inside the private network only.
-
-In `docker-compose.yml` the same three services sit behind the `monitoring` profile, so a deployment that does not want them is unaffected:
+In `docker-compose.yml` the monitoring services sit behind the `monitoring` profile, so it needs to be explicitly selected:
 
 ```bash
 docker compose --profile monitoring up -d
 ```
 
-Set `STATSD_HOST=statsd-exporter` in your `.env` when you enable the profile, and leave it unset when you do not. Pointing the builder at a collector that is not running costs nothing but a dropped packet — and a warning line per metric, which gets loud.
+Set `STATSD_HOST=statsd-exporter` in your `.env` when you enable the profile, and leave it unset when you do not. 
 
-Two things to know before scaling anything:
-
-- **`/metrics` is unauthenticated**, which is the convention, but `docker-compose.yml` publishes the app on 443. Nothing secret is in there, though endpoint names, request rates and latencies are. Gate it behind `BasicAuth` if that matters to you.
-- **`gunicorn.py` sets `workers = 1`.** Raising it gives each worker process its own metric registry, and scrapes would land on whichever one answers. That needs `prometheus_client`'s multiprocess mode.
-
-#### What is measured
-
-Scraped from the app and the worker:
-
-| Metric | Type | Labels |
-|---|---|---|
-| `rgp_http_requests_total` | counter | `method`, `endpoint`, `status` |
-| `rgp_http_duration_seconds` | histogram | `method`, `endpoint` |
-| `rgp_package_total` | counter | `outcome`, `update` |
-| `rgp_package_duration_seconds` | histogram | `update` |
-| `rgp_graph_build_state` | gauge | `state` |
-| `rgp_graph_build_stage` | gauge | `stage` |
-| `rgp_graph_build_next_timestamp_seconds` | gauge | — |
-| `rgp_worker_queued` | gauge | — |
-| `rgp_worker_in_progress` | gauge | — |
-| `rgp_worker_ongoing` | gauge | — |
-| `rgp_worker_jobs_complete_total` / `_failed_total` / `_retried_total` | counter | — |
-
-The last six describe the builder and the worker but are published by the **app**, because the app is the component that can read both sources when a scrape arrives: `build_status.json` on the shared volume, and ARQ's health key in Redis. They are the same numbers `/api/v1/health` reports, and they read correctly whether or not the builder is currently running — including under `--once`, where the builder has already exited.
-
-`rgp_graph_build_state` and `rgp_graph_build_stage` are the conventional Prometheus enum: a series per possible value, `1` on the current one and `0` on the rest, so `rgp_graph_build_stage{stage="building_tiles"} == 1` works as an alert expression. Every stage reads `0` when no build is running. `rgp_graph_build_next_timestamp_seconds` is absent, rather than zero, when the builder runs under an external scheduler and reports `externally_controlled`.
-
-A job stays on the queue until it finishes, so `rgp_worker_queued` counts waiting and running jobs together — `rgp_worker_queued - rgp_worker_in_progress` is the number actually waiting for capacity. A worker killed mid-job leaves its in-progress lock behind, and ARQ will not retry that job until the lock expires `job_timeout` seconds later, which `worker.py` sets to 24 hours. Until then it counts as queued and claimed while `rgp_worker_ongoing` reads 0 — that combination is the signature of an orphaned job.
-
-ARQ writes a single health key per queue, so the worker counters would describe only the last worker to report if a second one were ever added. There is one `worker` service in both compose files and nothing that scales it, so today they are simply correct.
-
-Pushed by the builder and by Valhalla, and mapped to Prometheus names in `monitoring/statsd_mapping.yml`:
-
-| Metric | Becomes | Labels |
-|---|---|---|
-| `rgp.build.duration` | `rgp_build_duration_seconds` | `outcome` |
-| `rgp.build.succeeded` / `.failed` / `.skipped` | `rgp_build_total` | `outcome` |
-| `rgp.build.stage.duration` | `rgp_build_stage_duration_seconds` | `stage` |
-| `valhalla.mjolnir.timing.*` | `valhalla_build_stage_duration_seconds` | `stage`, `provider` |
-
-`update` distinguishes a package a user asked for (`false`) from one re-zipped by `update_all_packages` after a graph swap (`true`).
-
-Valhalla's stages, in the order it runs them, are `initialize`, `parseways`, `parserelations`, `parsenodes`, `constructedges`, `build`, `enhance`, `filter`, `transit`, `validate` and `cleanup`. The builder invokes `valhalla_build_tiles` twice, `initialize` through `build` and then `enhance` through `cleanup`, with the elevation download in between, so all of them arrive under the same metric.
-
-`valhalla_build_tiles` times every one of its own stages and reports them itself; all the builder does is write a `statsd` block into each generation's `valhalla.json`, which it does whenever `STATSD_HOST` is set. Those are the same numbers the `[TIMING]` lines in the build log carry. The stages the builder owns — pruning, the PBF download and update, the symlink swap — are the ones Valhalla knows nothing about, and they arrive as `rgp.build.stage.duration` instead.
-
-`monitoring/statsd_mapping.yml` only has to cover what is still pushed. It gives the build timers histogram buckets that suit their scale, hours rather than the seconds a default bucket set assumes, and folds the three outcome counters into one `rgp_build_total{outcome=...}`. Metrics matching no rule are still exported under a name derived from the StatsD one, so a missing rule loses the tuning, not the data. The scraped metrics need none of this: their buckets are declared in `routing_packager_app/metrics.py`, in seconds, where they can be read next to the code that fills them.
-
-### Authentication and Authorization 
-
-The REST API supports two methods of authentication: basic auth and api keys. 
-
-#### Basic Auth 
-
-Rather than a full fledged user management system, this method provides access to all routes for an admin user. 
-
-
-#### API Keys 
-
-For all non-admin users, access to either reading or reading and creating jobs can be granted by the admin user via issuing API keys. These keys can be created with a specific permission and validity duration in days. Furthermore, they can be annotated with comments. Finally, they can be revoked and their permissions and validity changed at any given time.
-
-> **Note**: For security reasons, keys are not stored directly in the database. Instead, their hashes are stored. This means the raw key is only available once in the response of the key creation request. Afterwards, you will only be able to retrieve the hashed key, which is not usable for authentication. 
-
-##### Examples 
-
-###### Creating a new key 
-
-```
-curl --location -XPOST 'http://localhost:5000/api/v1/keys' \
---header 'Authorization: Basic <encoded_auth>' \
---header 'Content-Type: application/json' \
---data-raw '{
-	"permission": "read",  # read, write or internal (for reading logs)
-	"validity_days": 90,
-	"comment": "issued to client XY"  # supports arbitrary comments
-}'
-```
-
-The created key is returned as part of the response. Make sure to store the key, since this will be the only time it is accessible directly. In the DB, only its hash is stored. 
-
-
-###### Retrieving a key 
-
-Keys can either be found through their ID: 
-
-```
-curl --location -XPOST 'http://localhost:5000/api/v1/keys/<id>' \
---header 'Authorization: Basic <encoded_auth>' 
-```
-
-or using query parameters: 
-
-```
-curl --location -XPOST 'http://localhost:5000/api/v1/keys/?comment="client xy"' \
---header 'Authorization: Basic <encoded_auth>' 
-```
-
-```
-curl --location -XPOST 'http://localhost:5000/api/v1/keys/?is_active=true'\
---header 'Authorization: Basic <encoded_auth>' 
-```
-
-###### Revoking a key 
-
-Keys can be modified through PATCH requests: 
-
-```
-curl --location -XPATCH 'http://localhost:5000/api/v1/keys' \
---header 'Authorization: Basic <encoded_auth>' \
---header 'Content-Type: application/json' \
---data-raw '{
-	"is_active": false 
-}'
-```
-
-This method also allows changing a key's validity, comment or permission.
-
-###### Passing a key 
-
-When reading or creating jobs, you can pass an API key instead of a basic auth header like this: 
-
-```
-curl --location -XGET 'http://localhost:443/api/v1/jobs' --header 'x-api-key: H_I99kW7qqMATr5SGYTLAQ' --header 'Content-Type: application/json'
-```
-
+If you run a separate Prometheus instance, just point it at the three targets (see `monitoring/prometheus.yml`).

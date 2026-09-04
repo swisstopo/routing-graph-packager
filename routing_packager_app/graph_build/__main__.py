@@ -95,12 +95,7 @@ def run_build(provider: str) -> BuildOutcome:
                 outcome = "skipped"
                 return BuildOutcome.SKIPPED
 
-            prune_generations(
-                generations_dir,
-                link,
-                SETTINGS.GRAPH_KEEP_GENERATIONS,
-                SETTINGS.GRAPH_PRUNE_TIMEOUT,
-            )
+            prune_generations(generations_dir, link, SETTINGS.GRAPH_PRUNE_TIMEOUT)
 
             if not pbf.is_file():
                 download_pbf(pbf)

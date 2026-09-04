@@ -33,7 +33,6 @@ class BaseSettings(_BaseSettings):
 
     # GRAPH BUILD ###
     GRAPH_BUILD_CRON: str = "0 3 * * 0"  # 03:00 AM every Sunday
-    GRAPH_KEEP_GENERATIONS: int = 1
     GRAPH_PRUNE_TIMEOUT: int = 3600
     GRAPH_LOCK_TTL: int = 345600
     PBF_LOCAL_PATH: Path | None = None

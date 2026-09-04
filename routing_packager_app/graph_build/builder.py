@@ -5,7 +5,7 @@ A **generation** is one graph: the complete tile set produced by a single build 
 its own timestamped directory. Generations are never modified once built. A build creates a
 new one, and on success the ``graph`` symlink is moved to point at it, which is what makes it
 the one packaging jobs read from. Older generations stay on disk untouched until a later build
-prunes them. By default, no more than two generations exist on disk: one serving as the final graph,
+prunes them. No more than two generations exist on disk: one serving as the final graph,
 one being currently built.
 """
 
@@ -26,6 +26,7 @@ from ..utils.lock_utils import lock_exclusive
 from .status import BUILD_STATUS
 
 GENERATION_FORMAT = "%Y%m%dT%H%M%S"
+KEEP_GENERATIONS = 1
 
 _current: subprocess.Popen | None = None
 
@@ -145,7 +146,7 @@ def _remove_generation(generation: Path) -> Path:
     return generation
 
 
-def prune_generations(generations_dir: Path, link: Path, keep: int, timeout: float = 0.0) -> List[Path]:
+def prune_generations(generations_dir: Path, link: Path, timeout: float = 0.0) -> List[Path]:
     """
     Deletes graph generations that are neither current nor still held by a packaging job.
 
@@ -160,7 +161,6 @@ def prune_generations(generations_dir: Path, link: Path, keep: int, timeout: flo
 
     :param generations_dir: the directory holding every built generation.
     :param link: the graph symlink, whose target is never pruned.
-    :param keep: how many generations to retain, the current one included.
     :param timeout: how many seconds to wait for a generation held by a packaging job.
 
     :returns: the pruned generation directories.
@@ -179,8 +179,8 @@ def prune_generations(generations_dir: Path, link: Path, keep: int, timeout: flo
     # in packaging
     # names are timestamps, so reverse order means newest to oldest
     others = sorted((p for p in generations_dir.iterdir() if p.is_dir() and p != current), reverse=True)
-    # retain the <keep> newest ones
-    retained = set(others[: max(keep - 1, 0)])
+    # retain the KEEP_GENERATIONS newest ones
+    retained = set(others[: max(KEEP_GENERATIONS - 1, 0)])
 
     pruned: List[Path] = []
     for generation in others:
@@ -206,8 +206,8 @@ def prune_generations(generations_dir: Path, link: Path, keep: int, timeout: flo
             if not acquired:
                 raise BuildError(
                     f"Generation {generation.name} is still held by a packaging job after "
-                    f"{timeout:.0f}s. Aborting so that no more than {keep + 1} tile sets end up "
-                    "on disk."
+                    f"{timeout:.0f}s. Aborting so that no more than {KEEP_GENERATIONS + 1} tile "
+                    "sets end up on disk."
                 )
             pruned.append(_remove_generation(generation))
 

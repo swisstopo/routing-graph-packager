@@ -72,21 +72,22 @@ def test_prune_keeps_current_generation(graph_dirs):
     current = make_generation(generations, "20260108T000000")
     swap_graph_link(link, current)
 
-    pruned = prune_generations(generations, link, keep=1)
+    pruned = prune_generations(generations, link)
 
     assert pruned == [old]
     assert not old.exists()
     assert current.is_dir()
 
 
-def test_prune_retains_extra_generations(graph_dirs):
+def test_prune_retains_extra_generations(graph_dirs, monkeypatch):
+    monkeypatch.setattr("routing_packager_app.graph_build.builder.KEEP_GENERATIONS", 2)
     generations, link = graph_dirs
     oldest = make_generation(generations, "20260101T000000")
     previous = make_generation(generations, "20260108T000000")
     current = make_generation(generations, "20260115T000000")
     swap_graph_link(link, current)
 
-    pruned = prune_generations(generations, link, keep=2)
+    pruned = prune_generations(generations, link)
 
     assert pruned == [oldest]
     assert previous.is_dir()
@@ -102,14 +103,14 @@ def test_prune_aborts_the_build_when_a_generation_stays_held(graph_dirs):
     lock_id = hold_shared_lock(old)
     try:
         with pytest.raises(BuildError, match="still held by a packaging job"):
-            prune_generations(generations, link, keep=1, timeout=0.2)
+            prune_generations(generations, link, timeout=0.2)
     finally:
         _release(lock_id)
 
     assert old.is_dir()
     assert current.is_dir()
 
-    assert prune_generations(generations, link, keep=1) == [old]
+    assert prune_generations(generations, link) == [old]
     assert not old.exists()
 
 
@@ -122,7 +123,7 @@ def test_prune_waits_for_a_reader_to_finish(graph_dirs, monkeypatch):
 
     lock_id = hold_shared_lock(old)
     threading.Timer(0.3, _release, [lock_id]).start()
-    pruned = prune_generations(generations, link, keep=1, timeout=30)
+    pruned = prune_generations(generations, link, timeout=30)
 
     assert pruned == [old]
     assert not old.exists()
