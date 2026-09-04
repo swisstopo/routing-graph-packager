@@ -29,7 +29,7 @@ class BaseSettings(_BaseSettings):
     DATA_DIR: Path = BASE_DIR.joinpath("data")
     TMP_DATA_DIR: Path = BASE_DIR.joinpath("tmp_data")
 
-    ENABLED_PROVIDERS: list[str] = list(CommaSeparatedStrings("osm"))
+    ENABLED_PROVIDERS: list[str] = list(CommaSeparatedStrings("osm,tomtom"))
 
     # GRAPH BUILD ###
     GRAPH_BUILD_CRON: str = "0 3 * * 0"  # 03:00 AM every Sunday
@@ -45,7 +45,7 @@ class BaseSettings(_BaseSettings):
     MAX_CACHE_SIZE: int = 1000000000
 
     # DATABASES ###
-    POSTGRES_HOST: str = "localhost"
+    POSTGRES_HOST: str = "postgis"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "gis"
     POSTGRES_USER: str = "docker"
