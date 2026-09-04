@@ -1,6 +1,7 @@
 volumes:
   postgis-data:
   prometheus-data:
+  grafana-data:
   packages: # do not change any detail of this volume
     driver: local
     driver_opts:
@@ -160,6 +161,7 @@ services:
       - .docker_env
       - .env
     volumes:
+      - grafana-data:/var/lib/grafana
       - $PWD/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - $PWD/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     networks:

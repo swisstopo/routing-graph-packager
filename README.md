@@ -320,13 +320,13 @@ Postgres is checked with a `SELECT 1`, Redis with a `PING`. The worker's entry c
 
 Prometheus is used for application level monitoring for all three services: 
 
-  - **HTTP API**: exposes its own public `/metrics` router that presents metrics collected via a small ASGI middleware 
-  - **Worker**: runs its own minimal HTTP API with only a `/metrics` route in a background thread
+  - **HTTP API**: collects metrics via a small ASGI middleware and serves them on `METRICS_PORT`, from a background thread
+  - **Worker**: serves its own metrics on `METRICS_PORT` the same way
   - **Graph Builder**: pushes [StatsD](https://github.com/statsd/statsd) messages. The reason for that is that the graph build might be externally controlled via k8s in the future, so it is not guaranteed to be a long running process. Also, the valhalla graph build itself publishes StatsD, so both can share a single exporter that exposes to Prometheus.
 
 | Variable | Default | Description |
 |---|---|---|
-| `METRICS_PORT` | `9101` | Port the worker serves `/metrics` on. `0` leaves it unscrapeable |
+| `METRICS_PORT` | `9101` | Port the app and the worker serve `/metrics` on. `0` leaves them unscrapeable |
 | `STATSD_HOST` | (empty) | Where the builder and Valhalla send metrics. Empty disables them |
 | `STATSD_PORT` | `8125` | The collector's UDP port |
 | `STATSD_PREFIX` | `rgp` | Prefixed to the builder's metrics. Valhalla's own always use `valhalla` |
@@ -343,4 +343,7 @@ docker compose --profile monitoring up -d
 
 Set `STATSD_HOST=statsd-exporter` in your `.env` when you enable the profile, and leave it unset when you do not. 
 
-If you run a separate Prometheus instance, just point it at the three targets (see `monitoring/prometheus.yml`).
+#### Running a separate Prometheus instance
+
+Currently, the monitoring end points are not exposed outside of the private network, so if you are running a Prometheus instance elsewhere and want to point it at these, you need to expose the ports and make sure they are reachable from Prometheus. Take a look at `monitoring/prometheus.yml` to see the internal ports and end points where metrics are published.
+

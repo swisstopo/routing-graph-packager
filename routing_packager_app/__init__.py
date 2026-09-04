@@ -7,7 +7,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from pathlib import Path
 
 from .config import SETTINGS
-from .metrics import METRICS_PATH, MetricsMiddleware, metrics_endpoint, register_collectors
+from .metrics import MetricsMiddleware, register_collectors
 
 
 def create_app(lifespan: Optional[Lifespan[FastAPI]]):
@@ -21,8 +21,6 @@ def create_app(lifespan: Optional[Lifespan[FastAPI]]):
     BASE_DIR = Path(__file__).resolve().parent.parent
     app = FastAPI(title="Routing Graph Packager App", description=description, lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=f"{BASE_DIR}/static"), name="static")
-    # a route rather than a mount: a mount makes /metrics redirect to /metrics/ on every scrape
-    app.add_api_route(METRICS_PATH, metrics_endpoint, include_in_schema=False)
     register_collectors()
 
     register_middlewares(app)

@@ -14,17 +14,9 @@ from typing import Any, Dict, Iterator
 import redis
 from arq.constants import default_queue_name, health_check_key_suffix, in_progress_key_prefix
 from datadog.dogstatsd.base import DogStatsd
-from prometheus_client import (
-    CONTENT_TYPE_LATEST,
-    Counter,
-    Histogram,
-    disable_created_metrics,
-    generate_latest,
-    start_http_server,
-)
+from prometheus_client import Counter, Histogram, disable_created_metrics, start_http_server
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
-from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .config import SETTINGS
@@ -34,8 +26,6 @@ WORKER_HEALTH_KEY = default_queue_name + health_check_key_suffix
 IN_PROGRESS_PATTERN = in_progress_key_prefix + "*"
 
 disable_created_metrics()
-
-METRICS_PATH = "/metrics"
 
 HTTP_REQUESTS = Counter(
     "rgp_http_requests",
@@ -242,21 +232,13 @@ def register_collectors() -> None:
     _collectors_registered = True
 
 
-async def metrics_endpoint() -> Response:
-    """
-    Serves the Prometheus exposition.
-
-    Deliberately uncompressed. ``make_asgi_app`` would gzip it and set ``Content-Encoding`` itself,
-    and ``GZipMiddleware`` would then gzip that again and set the header a second time, leaving
-    Prometheus to decompress once and find gzip where it expected text. One compressor only.
-    """
-    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
-
-
 def start_metrics_server() -> None:
     """
-    Serves ``/metrics`` from a background thread. Used by the worker which mounts
-    its own small HTTP server this way.
+    Serves ``/metrics`` from a background thread, on ``METRICS_PORT``.
+
+    Both the app and the worker expose their metrics this way, so Prometheus scrapes them
+    identically. It also keeps the exposition off the app's public port, which serves TLS whenever
+    ``SSL_CERT`` and ``SSL_KEY`` are set.
     """
     if not SETTINGS.METRICS_PORT:
         return
@@ -292,8 +274,8 @@ class MetricsMiddleware:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        # ignore metrics end point and non-http scopes
-        if scope["type"] != "http" or scope["path"].startswith(METRICS_PATH):
+        # ignore non-http scopes
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 

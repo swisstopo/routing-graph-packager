@@ -41,6 +41,9 @@ jobs:
           GRAPH_BUILD_CRON=${{ vars.GRAPH_BUILD_CRON || '0 3 * * 0' }}
           GRAPH_PRUNE_TIMEOUT=${{ vars.GRAPH_PRUNE_TIMEOUT || '3600' }}
           GRAPH_LOCK_TTL=${{ vars.GRAPH_LOCK_TTL || '345600' }}
+          STATSD_HOST=statsd-exporter
+          GF_SECURITY_ADMIN_USER=${{ vars.GRAFANA_ADMIN_USER || 'admin' }}
+          GF_SECURITY_ADMIN_PASSWORD=${{ secrets.GRAFANA_ADMIN_PASS }}
           HTTP_PROXY=${{ vars.HTTP_PROXY }}
           HTTPS_PROXY=${{ vars.HTTPS_PROXY }}
           NO_PROXY=${{ vars.NO_PROXY }}
@@ -56,10 +59,10 @@ jobs:
 
       - name: Pull latest images
         run: |
-          docker compose pull
+          docker compose --profile monitoring pull
 
       - name: Deploy app
         run: |
-          docker compose down --remove-orphans
-          docker compose up -d
+          docker compose --profile monitoring down --remove-orphans
+          docker compose --profile monitoring up -d
           docker image prune -af
