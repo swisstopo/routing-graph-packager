@@ -1,5 +1,5 @@
 """
-Monitoring metrics for th app, the worker and the graph build.
+Monitoring metrics for the app, the worker and the graph build.
 
 Prometheus is used for the app and the worker (long lived services), while StatsD is used for the
 graph builder (which may be an externally controlled one-shot).
@@ -55,6 +55,7 @@ PACKAGE_DURATION = Histogram(
 
 STATSD_ENABLED = bool(SETTINGS.STATSD_HOST)
 
+# env var read by datadog statsd client
 if not STATSD_ENABLED:
     os.environ["DD_DOGSTATSD_DISABLE"] = "true"
 
@@ -132,7 +133,7 @@ class BuildStatusCollector:
             stage.add_metric([value.value], float(status.get("stage") == value.value))
         yield stage
 
-        # absent rather than zero under an external scheduler, which reports no timestamp at all
+        # absent under an external scheduler
         try:
             when = datetime.fromisoformat(status["next_build_at"])
         except (KeyError, TypeError, ValueError):
@@ -148,14 +149,6 @@ class BuildStatusCollector:
 class WorkerCollector:
     """
     Publishes the worker's queue counters, read from Redis at scrape time.
-
-    ARQ writes its counters to a health check key, the queue answers for its own depth, and the
-    in-progress locks say how much of that depth is already claimed. The app collects them because
-    it is the component that can reach Redis on a scrape.
-
-    A job stays on the queue until it finishes, so ``rgp_worker_queued`` on its own counts waiting
-    and running jobs together, and keeps counting a job whose worker died until its lock expires
-    ``job_timeout`` seconds later.
     """
 
     def __init__(self):
@@ -235,10 +228,6 @@ def register_collectors() -> None:
 def start_metrics_server() -> None:
     """
     Serves ``/metrics`` from a background thread, on ``METRICS_PORT``.
-
-    Both the app and the worker expose their metrics this way, so Prometheus scrapes them
-    identically. It also keeps the exposition off the app's public port, which serves TLS whenever
-    ``SSL_CERT`` and ``SSL_KEY`` are set.
     """
     if not SETTINGS.METRICS_PORT:
         return

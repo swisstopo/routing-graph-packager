@@ -62,10 +62,6 @@ def _log_tag(cmd: List[str]) -> str:
 def terminate_current() -> None:
     """
     Stops the subprocess a build is currently waiting on, if there is one.
-
-    Called from the signal handler: a build spends nearly all of its wall clock inside one of
-    Valhalla's binaries, so a shutdown that does not reach the child only ends in the kernel
-    SIGKILLing it once the grace period runs out.
     """
     process = _current
 
@@ -115,10 +111,6 @@ def _valhalla_version() -> str:
 def _statsd_options(provider: str) -> List[str]:
     """
     Builds the flags that point Valhalla's own metrics at our collector.
-
-    ``valhalla_build_tiles`` reports a timer per build stage, ``mjolnir.timing.<stage>``, the same
-    numbers it prints as ``[TIMING]``. It only sends them if the config it is given names a statsd
-    host, which is what these flags write into the generation's ``valhalla.json``.
 
     :param provider: the dataset provider being built, sent as a tag.
 

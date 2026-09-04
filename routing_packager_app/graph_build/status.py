@@ -4,9 +4,6 @@ Publishes what the graph builder is currently doing to a file on the shared volu
 The builder runs in its own container, so the API app cannot ask it anything directly. Instead
 every stage transition is written to ``build_status.json`` next to the ``graph``
 symlink, where ``/api/v1/health`` reads it.
-
-Long stages additionally refresh ``updated_at``, so a reader can see when the builder was last
-heard from rather than only when the current stage started.
 """
 
 import json
@@ -19,7 +16,7 @@ from ..config import SETTINGS
 from ..constants import BuildStage, BuildState
 from ..metrics import STATSD
 
-HEARTBEAT_INTERVAL = 10.0
+HEARTBEAT_INTERVAL = 10.0  # report the builder as active every n seconds
 EXTERNAL_SCHEDULE = "externally_controlled"
 
 
@@ -89,7 +86,7 @@ class BuildStatus:
 
     def heartbeat(self) -> None:
         """
-        Refreshes ``updated_at`` if the throttling interval has passed.
+        Refreshes ``updated_at`` if the interval has passed.
 
         Called for every line a build subprocess emits, so it has to stay cheap: the common case
         is a single monotonic clock comparison.
