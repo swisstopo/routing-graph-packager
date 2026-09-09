@@ -1,0 +1,29 @@
+name: smoke-test
+on: workflow_dispatch
+
+jobs:
+  smoke:
+    runs-on: integration_runner
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker socket reachable from the job
+        run: |
+          docker version
+          docker ps
+
+      - name: Compose plugin
+        run: docker compose version
+
+      - name: Corporate CAs
+        run: |
+          curl -sSI https://github.com | head -1
+          openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt \
+            /usr/local/share/ca-certificates/RootCAVI.crt
+
+      - name: Secrets must not be readable
+        run: |
+          if env | grep -qiE 'RUNNER_API_TOKEN|RUNNER_TOKEN'; then
+            echo "FAIL: a secret leaked into the job"; exit 1
+          fi
+          echo "OK: no secret in the job environment"
