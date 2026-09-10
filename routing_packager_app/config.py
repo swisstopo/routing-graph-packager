@@ -29,8 +29,6 @@ class BaseSettings(_BaseSettings):
     DATA_DIR: Path = BASE_DIR.joinpath("data")
     TMP_DATA_DIR: Path = BASE_DIR.joinpath("tmp_data")
 
-    ENABLED_PROVIDERS: list[str] = list(CommaSeparatedStrings("osm,tomtom"))
-
     # GRAPH BUILD ###
     GRAPH_BUILD_CRON: str = "0 3 * * 0"  # 03:00 AM every Sunday
     GRAPH_PRUNE_TIMEOUT: int = 3600
@@ -79,25 +77,25 @@ class BaseSettings(_BaseSettings):
 
         return data
 
-    def get_provider_dir(self, provider: str = Providers.OSM.lower()) -> Path:
+    def get_provider_dir(self, provider: str) -> Path:
         """
         Return the root directory holding one provider's graph generations.
         """
         return self.get_tmp_data_dir().joinpath(provider)
 
-    def get_graph_link(self, provider: str = Providers.OSM.lower()) -> Path:
+    def get_graph_link(self, provider: str) -> Path:
         """
         Return the symlink pointing at the generation currently served to packaging jobs.
         """
         return self.get_provider_dir(provider).joinpath("graph")
 
-    def get_generations_dir(self, provider: str = Providers.OSM.lower()) -> Path:
+    def get_generations_dir(self, provider: str) -> Path:
         """
         Return the directory holding every built graph generation for a provider.
         """
         return self.get_provider_dir(provider).joinpath("generations")
 
-    def get_build_status_path(self, provider: str = Providers.OSM.lower()) -> Path:
+    def get_build_status_path(self, provider: str) -> Path:
         """
         Return the file the graph builder publishes its current stage to. It's
         a small JSON file that the graph builder continuously updates, which

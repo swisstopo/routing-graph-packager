@@ -87,7 +87,7 @@ async def test_failed_update_keeps_the_existing_package(get_client: TestClient, 
     new_job = create_new_job(get_client, DEFAULT_ARGS, basic_auth_header)
     shutil.rmtree(Path(new_job.json()["zip_path"]).parent)
     params = create_package_params(new_job.json())
-    previous = Path(params[5]).parent
+    previous = params.zip_path.parent
     previous.joinpath("osm_test.zip").write_bytes(b"the package from the last build")
 
     with pytest.raises(HTTPException):
@@ -104,7 +104,7 @@ async def test_failed_creation_removes_the_partial_package(
     new_job = create_new_job(get_client, DEFAULT_ARGS, basic_auth_header)
     shutil.rmtree(Path(new_job.json()["zip_path"]).parent)
     params = create_package_params(new_job.json())
-    partial = Path(params[5]).parent
+    partial = params.zip_path.parent
 
     with pytest.raises(HTTPException):
         await create_package(*params, False)
@@ -119,7 +119,7 @@ async def test_a_missing_output_directory_does_not_mask_the_failure(
     new_job = create_new_job(get_client, DEFAULT_ARGS, basic_auth_header)
     shutil.rmtree(Path(new_job.json()["zip_path"]).parent)
     params = create_package_params(new_job.json())
-    shutil.rmtree(Path(params[5]).parent)
+    shutil.rmtree(params.zip_path.parent)
 
     with pytest.raises(HTTPException) as e:
         await create_package(*params, False)

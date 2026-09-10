@@ -11,7 +11,7 @@ from arq.connections import RedisSettings
 from croniter import croniter
 
 from ..config import SETTINGS
-from ..constants import BuildOutcome, Providers
+from ..constants import PROVIDERS, BuildOutcome, Providers
 from ..db import create_tables
 from ..logger import BUILD_LOGGER
 from ..metrics import STATSD
@@ -208,6 +208,12 @@ def _parse_args(argv: List[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m routing_packager_app.graph_build",
         description="Builds the Valhalla graph the packager creates its extracts from.",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=PROVIDERS,
+        help=f"Which provider to build for. Must be one of {', '.join(PROVIDERS)}.",
+        required=True,
     )
     parser.add_argument(
         "--once",

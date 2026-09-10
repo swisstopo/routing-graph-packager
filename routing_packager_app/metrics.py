@@ -20,7 +20,7 @@ from prometheus_client.registry import REGISTRY
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .config import SETTINGS
-from .constants import BuildStage, BuildState
+from .constants import PROVIDERS, BuildStage, BuildState
 
 WORKER_HEALTH_KEY = default_queue_name + health_check_key_suffix
 IN_PROGRESS_PATTERN = in_progress_key_prefix + "*"
@@ -112,38 +112,42 @@ class BuildStatusCollector:
     """
 
     def collect(self) -> Iterator[GaugeMetricFamily]:
-        try:
-            status = json.loads(SETTINGS.get_build_status_path().read_text(encoding="utf8"))
-        except (OSError, ValueError):
-            return
+        for provider in PROVIDERS:
+            try:
+                status = json.loads(SETTINGS.get_build_status_path(provider).read_text(encoding="utf8"))
+            except (OSError, ValueError):
+                continue
 
-        state = GaugeMetricFamily(
-            "rgp_graph_build_state", "1 on the graph builder's current state.", labels=["state"]
-        )
-        for value in BuildState:
-            state.add_metric([value.value], float(status.get("state") == value.value))
-        yield state
+            state = GaugeMetricFamily(
+                "rgp_graph_build_state",
+                "1 on the graph builder's current state.",
+                labels=["state", provider],
+            )
+            for value in BuildState:
+                state.add_metric([value.value], float(status.get("state") == value.value))
+            yield state
 
-        stage = GaugeMetricFamily(
-            "rgp_graph_build_stage",
-            "1 on the step a running graph build is on, all zero when none is running.",
-            labels=["stage"],
-        )
-        for value in BuildStage:
-            stage.add_metric([value.value], float(status.get("stage") == value.value))
-        yield stage
+            stage = GaugeMetricFamily(
+                "rgp_graph_build_stage",
+                "1 on the step a running graph build is on, all zero when none is running.",
+                labels=["stage", provider],
+            )
+            for value in BuildStage:
+                stage.add_metric([value.value], float(status.get("stage") == value.value))
+            yield stage
 
-        # absent under an external scheduler
-        try:
-            when = datetime.fromisoformat(status["next_build_at"])
-        except (KeyError, TypeError, ValueError):
-            return
+            # absent under an external scheduler
+            try:
+                when = datetime.fromisoformat(status["next_build_at"])
+            except (KeyError, TypeError, ValueError):
+                continue
 
-        yield GaugeMetricFamily(
-            "rgp_graph_build_next_timestamp_seconds",
-            "When the next graph build is due.",
-            value=when.timestamp(),
-        )
+            yield GaugeMetricFamily(
+                "rgp_graph_build_next_timestamp_seconds",
+                "When the next graph build is due.",
+                value=when.timestamp(),
+                labels=[provider],
+            )
 
 
 class WorkerCollector:

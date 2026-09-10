@@ -1,11 +1,13 @@
 import json
+from pathlib import Path
 from shutil import rmtree
-from typing import List, Tuple  # noqa: F401
+from typing import List, NamedTuple, Tuple  # noqa: F401
 
 from starlette.testclient import TestClient
 
 from httpx import Response
 from routing_packager_app import SETTINGS
+from routing_packager_app.constants import Providers
 from routing_packager_app.graph_build.builder import swap_graph_link
 from routing_packager_app.utils.file_utils import make_package_path
 
@@ -87,9 +89,9 @@ def create_new_user(client: TestClient, data: dict, auth_header, must_succeed=Tr
 
     if must_succeed:
         res_json = response.json()
-        assert (
-            response.status_code == 200
-        ), f"status code was {response.status_code} with {response.json()}"
+        assert response.status_code == 200, (
+            f"status code was {response.status_code} with {response.json()}"
+        )
         assert response.headers["Content-Type"] == "application/json"
         assert set(res_json.keys()) >= {"id", "email"}
         return response
@@ -104,40 +106,61 @@ def create_new_job(client, data, auth_header, must_succeed=True) -> Response:
     response = client.post("/api/v1/jobs/", headers=auth_header, json=data)
 
     if must_succeed:
-        assert (
-            response.status_code == 200
-        ), f"status code was {response.status_code} with {response.content}"
+        assert response.status_code == 200, (
+            f"status code was {response.status_code} with {response.content}"
+        )
         assert response.headers["Content-Type"] == "application/json"
         return response
     return response
 
 
-def create_new_key(client, data, auth_header, must_succeed=True) -> Response: 
+def create_new_key(client, data, auth_header, must_succeed=True) -> Response:
     """
     Helper function for new api key creation.
     """
     response = client.post("/api/v1/keys/", headers=auth_header, json=data)
 
     if must_succeed:
-        assert (
-            response.status_code == 200
-        ), f"status code was {response.status_code} with {response.content}"
+        assert response.status_code == 200, (
+            f"status code was {response.status_code} with {response.content}"
+        )
         assert response.headers["Content-Type"] == "application/json"
         return response
     return response
 
 
-def create_package_params(j):
+class PackageParams(NamedTuple):
+    """
+    The positional arguments ``create_package`` takes, in its own argument order.
+
+    Unpacks with ``*params`` like the plain tuple it replaces, but callers that only want one
+    of them reach it by name, so inserting an argument here can no longer silently re-point
+    them at the value that used to sit at that index.
+    """
+
+    ctx: dict
+    job_id: int
+    job_name: str
+    job_provider: Providers
+    description: str
+    bbox: str
+    zip_path: Path
+    user_id: int
+
+
+def create_package_params(j) -> PackageParams:
     """
     Create the parameters for create_package task, with user ID 1.
 
     :param dict j: The job response in JSON
 
-    :returns: Tuple with all parameters inside
-    :rtype: tuple
+    :returns: All parameters, in create_package's argument order
+    :rtype: PackageParams
     """
     output_dir = SETTINGS.get_output_path()
 
     result_path = make_package_path(output_dir, j["name"], j["provider"])
 
-    return {}, j["id"], j["name"], j["description"], j["bbox"], result_path, 1
+    return PackageParams(
+        {}, j["id"], j["name"], j["provider"], j["description"], j["bbox"], result_path, 1
+    )

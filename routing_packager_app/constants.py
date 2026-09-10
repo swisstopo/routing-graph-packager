@@ -7,6 +7,9 @@ class Providers(str, Enum):
     HERE = "here"
 
 
+PROVIDERS = [p.value.lower() for p in Providers]
+
+
 class Statuses(str, Enum):
     QUEUED = "Queued"
     COMPRESSING = "Compressing"

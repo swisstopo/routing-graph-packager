@@ -19,7 +19,7 @@ from .api_v1.dependencies import split_bbox
 from .config import SETTINGS
 from .db import create_tables, get_db
 from .api_v1.models import User, Job
-from .constants import Statuses
+from .constants import Providers, Statuses
 from .logger import AppSmtpHandler, get_smtp_details, LOGGER
 from .metrics import PACKAGE_DURATION, PACKAGES, start_metrics_server
 from .utils.file_utils import make_zip
@@ -32,6 +32,7 @@ async def create_package(
     ctx,
     job_id: int,
     job_name: str,
+    job_provider: Providers,
     description: str,
     bbox: str,
     zip_path: str,
@@ -80,7 +81,7 @@ async def create_package(
         # TODO: gzipping is synchronous, maybe follow
         #   https://arq-docs.helpmanual.io/#synchronous-jobs
 
-        graph_link = SETTINGS.get_graph_link()
+        graph_link = SETTINGS.get_graph_link(job_provider.lower())
         # exit stack is used to wrap the contextmanager entry
         # in a try/except
         stack = ExitStack()
@@ -110,6 +111,7 @@ async def create_package(
         j = {
             "job_id": job_id,
             "filepath": fname,
+            "provider": job_provider.lower(),
             "name": job_name,
             "description": description,
             "extent": bbox,
@@ -204,6 +206,7 @@ async def update_all_packages(ctx):
                 ctx,
                 job.id,
                 job.arq_id,
+                job.provider,
                 job.description,
                 wkbe_to_str(job.bbox),
                 job.zip_path,
