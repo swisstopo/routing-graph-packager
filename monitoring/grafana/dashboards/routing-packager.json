@@ -6,6 +6,34 @@
   "schemaVersion": 39,
   "version": 1,
   "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(rgp_graph_build_state, provider)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "provider",
+        "multi": true,
+        "name": "provider",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(rgp_graph_build_state, provider)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
   "time": {
     "from": "now-24h",
     "to": "now"
@@ -217,8 +245,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (stage) (rgp_build_stage_duration_seconds_sum) / sum by (stage) (rgp_build_stage_duration_seconds_count)",
-          "legendFormat": "{{stage}}",
+          "expr": "sum by (provider, stage) (rgp_build_stage_duration_seconds_sum{provider=~\"$provider\"}) / sum by (provider, stage) (rgp_build_stage_duration_seconds_count{provider=~\"$provider\"})",
+          "legendFormat": "{{provider}} {{stage}}",
           "instant": true,
           "range": false
         },
@@ -228,8 +256,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "valhalla_build_stage_duration_seconds{module!=\"util\"}",
-          "legendFormat": "valhalla {{module}}.{{stage}}",
+          "expr": "valhalla_build_stage_duration_seconds{module!=\"util\", provider=~\"$provider\"}",
+          "legendFormat": "valhalla {{provider}} {{module}}.{{stage}}",
           "instant": true,
           "range": false
         }
@@ -238,7 +266,9 @@
     {
       "id": 6,
       "type": "stat",
-      "title": "Graph builds, last 30 days",
+      "title": "Graph builds, last 30 days ($provider)",
+      "repeat": "provider",
+      "repeatDirection": "v",
       "description": "A skipped run found the build lock held by another builder and did nothing.",
       "datasource": {
         "type": "prometheus",
@@ -274,7 +304,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (outcome) (increase(rgp_build_total[30d]))",
+          "expr": "sum by (outcome) (increase(rgp_build_total{provider=\"$provider\"}[30d]))",
           "legendFormat": "{{outcome}}",
           "instant": true,
           "range": false
@@ -284,7 +314,9 @@
     {
       "id": 7,
       "type": "stat",
-      "title": "Mean successful build",
+      "title": "Mean successful build ($provider)",
+      "repeat": "provider",
+      "repeatDirection": "v",
       "description": "Wall clock of a full graph build, prune to symlink swap.",
       "datasource": {
         "type": "prometheus",
@@ -319,7 +351,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(rgp_build_duration_seconds_sum{outcome=\"succeeded\"}[30d])) / sum(rate(rgp_build_duration_seconds_count{outcome=\"succeeded\"}[30d]))",
+          "expr": "sum(rate(rgp_build_duration_seconds_sum{outcome=\"succeeded\", provider=\"$provider\"}[30d])) / sum(rate(rgp_build_duration_seconds_count{outcome=\"succeeded\", provider=\"$provider\"}[30d]))",
           "instant": true,
           "range": false
         }
@@ -375,11 +407,11 @@
         {
           "refId": "A",
           "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-          "expr": "rgp_graph_build_stage",
-          "legendFormat": "{{stage}}",
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rgp_graph_build_stage{provider=~\"$provider\"}",
+          "legendFormat": "{{provider}} {{stage}}",
           "interval": "1m"
         }
       ]
@@ -387,7 +419,9 @@
     {
       "id": 9,
       "type": "stat",
-      "title": "Build state",
+      "title": "Build state ($provider)",
+      "repeat": "provider",
+      "repeatDirection": "v",
       "description": "idle between builds, building during one, failed when the last one gave up, unknown before the builder has ever run.",
       "datasource": {
         "type": "prometheus",
@@ -428,10 +462,10 @@
         {
           "refId": "A",
           "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-          "expr": "rgp_graph_build_state == 1",
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rgp_graph_build_state{provider=\"$provider\"} == 1",
           "legendFormat": "{{state}}",
           "instant": true,
           "range": false
@@ -441,7 +475,9 @@
     {
       "id": 10,
       "type": "stat",
-      "title": "Next build in",
+      "title": "Next build in ($provider)",
+      "repeat": "provider",
+      "repeatDirection": "v",
       "description": "Counts down to the next GRAPH_BUILD_CRON occurrence. Blank while a build is running, and blank when the builder runs with --once, since something outside it owns the schedule.",
       "datasource": {
         "type": "prometheus",
@@ -474,10 +510,10 @@
         {
           "refId": "A",
           "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-          "expr": "rgp_graph_build_next_timestamp_seconds - time()",
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rgp_graph_build_next_timestamp_seconds{provider=\"$provider\"} - time()",
           "instant": true,
           "range": false
         }
@@ -516,9 +552,9 @@
         {
           "refId": "A",
           "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "rgp_worker_queued",
           "legendFormat": "queued",
           "interval": "1m"
@@ -526,9 +562,9 @@
         {
           "refId": "B",
           "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "rgp_worker_ongoing",
           "legendFormat": "ongoing",
           "interval": "1m"
@@ -585,9 +621,9 @@
         {
           "refId": "A",
           "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "increase(rgp_worker_jobs_complete_total[$__interval])",
           "legendFormat": "complete",
           "interval": "1m"
@@ -595,9 +631,9 @@
         {
           "refId": "B",
           "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "increase(rgp_worker_jobs_failed_total[$__interval])",
           "legendFormat": "failed",
           "interval": "1m"
@@ -605,9 +641,9 @@
         {
           "refId": "C",
           "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "increase(rgp_worker_jobs_retried_total[$__interval])",
           "legendFormat": "retried",
           "interval": "1m"

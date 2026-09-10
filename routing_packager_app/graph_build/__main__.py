@@ -11,7 +11,7 @@ from arq.connections import RedisSettings
 from croniter import croniter
 
 from ..config import SETTINGS
-from ..constants import PROVIDERS, BuildOutcome, Providers
+from ..constants import PROVIDERS, BuildOutcome
 from ..db import create_tables
 from ..logger import BUILD_LOGGER
 from ..metrics import STATSD
@@ -57,15 +57,17 @@ def _sleep_until(when: datetime) -> None:
         time.sleep(min(remaining, SLEEP_CHUNK))
 
 
-async def _enqueue_package_updates() -> None:
+async def _enqueue_package_updates(provider: str) -> None:
     """
-    After a graph build finishes, recreate existing packages with the
+    After a provider's graph build finishes, recreate existing packages with the
     new graph data.
+
+    :param provider: the dataset provider whose graph was just swapped in.
     """
     pool = await create_pool(RedisSettings.from_dsn(SETTINGS.REDIS_URL))
     try:
-        await pool.enqueue_job("update_all_packages")
-        BUILD_LOGGER.info("Enqueued update_all_packages for the worker.")
+        await pool.enqueue_job("update_all_packages", provider)
+        BUILD_LOGGER.info(f"Enqueued update_all_packages for {provider} packages.")
     finally:
         await (getattr(pool, "aclose", None) or pool.close)()
 
@@ -81,7 +83,7 @@ def run_build(provider: str) -> BuildOutcome:
     link = SETTINGS.get_graph_link(provider)
     generations_dir = SETTINGS.get_generations_dir(provider)
     generations_dir.mkdir(parents=True, exist_ok=True)
-    pbf = SETTINGS.get_pbf_path()
+    pbf = SETTINGS.get_pbf_path(provider)
 
     started = time.perf_counter()
     outcome = "failed"
@@ -109,14 +111,13 @@ def run_build(provider: str) -> BuildOutcome:
         BUILD_STATUS.idle()
         outcome = "succeeded"
     finally:
-        STATSD.timing(
-            "build.duration", (time.perf_counter() - started) * 1000, tags=[f"outcome:{outcome}"]
-        )
-        STATSD.increment(f"build.{outcome}")
+        tags = [f"outcome:{outcome}", f"provider:{provider}"]
+        STATSD.timing("build.duration", (time.perf_counter() - started) * 1000, tags=tags)
+        STATSD.increment(f"build.{outcome}", tags=[f"provider:{provider}"])
 
     # the build ran, so its time to re-create
     # existing packages with the new data
-    asyncio.run(_enqueue_package_updates())
+    asyncio.run(_enqueue_package_updates(provider))
 
     return BuildOutcome.BUILT
 
@@ -134,7 +135,7 @@ def run_once(provider: str) -> int:
     :returns: ``EXIT_OK`` when a graph was built and swapped in, ``EXIT_LOCKED`` when another
         build was already running and ``EXIT_FAILED`` when the build failed.
     """
-    BUILD_LOGGER.info("Running a single graph build.")
+    BUILD_LOGGER.info(f"Running a single {provider} graph build.")
 
     try:
         outcome = run_build(provider)
@@ -169,7 +170,9 @@ def run_scheduled(provider: str) -> int:
         )
         return EXIT_FAILED
 
-    BUILD_LOGGER.info(f"Graph builder started, GRAPH_BUILD_CRON is '{SETTINGS.GRAPH_BUILD_CRON}'.")
+    BUILD_LOGGER.info(
+        f"{provider} graph builder started, GRAPH_BUILD_CRON is '{SETTINGS.GRAPH_BUILD_CRON}'."
+    )
 
     if not SETTINGS.get_graph_link(provider).is_symlink():
         BUILD_LOGGER.info("No graph generation available yet, building immediately.")
@@ -231,7 +234,10 @@ def main(argv: List[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
-    provider = Providers.OSM.lower()
+    provider = args.provider
+    # BUILD_STATUS is a singleton, set its provider once here
+    BUILD_STATUS.bind(provider)
+    # create the provider directory
     SETTINGS.get_provider_dir(provider).mkdir(parents=True, exist_ok=True)
     create_tables()
 

@@ -236,3 +236,52 @@ def test_job_delete_invalid_pass(get_client, basic_auth_header):
         headers={"Authorization": "Basic YWRtaW5AZXhhbXBsZS5vcmc6YWRtaa5="},
     )
     assert res.status_code == 401
+
+
+def test_post_job_rejects_a_provider_nobody_builds_for(
+    get_client, basic_auth_header, tmp_path, monkeypatch
+):
+    """Without a build container for it, the job would only ever fail in the worker."""
+    monkeypatch.setattr(SETTINGS, "TMP_DATA_DIR", tmp_path)
+    tmp_path.joinpath("osm").mkdir()
+
+    res = create_new_job(
+        get_client,
+        auth_header=basic_auth_header,
+        data={**DEFAULT_ARGS_POST, "provider": Providers.TOMTOM},
+        must_succeed=False,
+    )
+
+    assert res.status_code == 400
+    assert "tomtom" in res.json()["detail"]
+    # the operator needs to know what they *can* ask for
+    assert "osm" in res.json()["detail"]
+
+
+def test_a_rejected_provider_leaves_no_output_directory(
+    get_client, basic_auth_header, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(SETTINGS, "TMP_DATA_DIR", tmp_path)
+    tmp_path.joinpath("osm").mkdir()
+
+    create_new_job(
+        get_client,
+        auth_header=basic_auth_header,
+        data={**DEFAULT_ARGS_POST, "provider": Providers.TOMTOM},
+        must_succeed=False,
+    )
+
+    assert not SETTINGS.get_output_path().joinpath("tomtom_test").exists()
+
+
+def test_post_job_names_every_deployed_provider_when_none_is_deployed(
+    get_client, basic_auth_header, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(SETTINGS, "TMP_DATA_DIR", tmp_path)
+
+    res = create_new_job(
+        get_client, auth_header=basic_auth_header, data=DEFAULT_ARGS_POST, must_succeed=False
+    )
+
+    assert res.status_code == 400
+    assert "none" in res.json()["detail"]

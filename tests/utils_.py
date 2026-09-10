@@ -42,28 +42,31 @@ class FakePool:
 GENERATION_NAME = "20260101T000000"
 WORKER_HEALTH = b"Aug-25 11:41:20 j_complete=41 j_failed=1 j_retried=0 j_ongoing=2 queued=3"
 
+# the provider the single-provider tests work against
+PROVIDER = Providers.OSM.value
 
-def reset_graph_state():
+
+def reset_graph_state(provider=PROVIDER):
     """Removes the graph symlink, every generation and the build status file."""
-    link = SETTINGS.get_graph_link()
+    link = SETTINGS.get_graph_link(provider)
     if link.is_symlink():
         link.unlink()
-    rmtree(SETTINGS.get_generations_dir(), ignore_errors=True)
-    SETTINGS.get_build_status_path().unlink(missing_ok=True)
+    rmtree(SETTINGS.get_generations_dir(provider), ignore_errors=True)
+    SETTINGS.get_build_status_path(provider).unlink(missing_ok=True)
 
 
-def make_generation(name=GENERATION_NAME, meta=None):
+def make_generation(name=GENERATION_NAME, meta=None, provider=PROVIDER):
     """Creates a generation and points the graph symlink at it, the way a finished build would."""
-    generation = SETTINGS.get_generations_dir().joinpath(name)
+    generation = SETTINGS.get_generations_dir(provider).joinpath(name)
     generation.mkdir(parents=True)
     if meta is not None:
         generation.joinpath("build_meta.json").write_text(json.dumps(meta), encoding="utf8")
-    swap_graph_link(SETTINGS.get_graph_link(), generation)
+    swap_graph_link(SETTINGS.get_graph_link(provider), generation)
 
     return generation
 
 
-def write_build_status(**overrides):
+def write_build_status(provider=PROVIDER, **overrides):
     """Writes a build status report, starting from an idle one."""
     report = {
         "state": "idle",
@@ -75,8 +78,9 @@ def write_build_status(**overrides):
         "last_error": None,
     }
     report.update(overrides)
-    SETTINGS.get_build_status_path().parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS.get_build_status_path().write_text(json.dumps(report), encoding="utf8")
+    status_path = SETTINGS.get_build_status_path(provider)
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    status_path.write_text(json.dumps(report), encoding="utf8")
 
     return report
 

@@ -13,11 +13,11 @@ from starlette.status import HTTP_401_UNAUTHORIZED
 
 from ..auth import BasicAuth, HeaderKey
 from ...config import SETTINGS
-from ...constants import PROVIDERS, BuildState, Providers
+from ...constants import BuildState
 from ...db import get_db
 from ...metrics import WORKER_HEALTH_KEY, parse_worker_health
 from ..models import APIKeys, APIPermission, User
-from ...utils.file_utils import resolve_graph
+from ...utils.file_utils import get_deployed_providers, resolve_graph
 
 router = APIRouter()
 
@@ -59,11 +59,11 @@ def _authenticate(db: Session, auth: HTTPBasicCredentials | None, key: str) -> b
         return False
 
 
-def _graph_report(provider: Providers) -> Dict[str, Any]:
-    link = SETTINGS.get_graph_link(provider.value.lower())
+def _graph_report(provider: str) -> Dict[str, Any]:
+    link = SETTINGS.get_graph_link(provider)
     report: Dict[str, Any] = {"available": False, "path": str(link)}
 
-    generation = resolve_graph()
+    generation = resolve_graph(provider)
     if generation is None:
         return report
 
@@ -75,14 +75,12 @@ def _graph_report(provider: Providers) -> Dict[str, Any]:
     return {"available": True, "path": str(link), **meta}
 
 
-def _build_report(provider: Providers) -> Dict[str, Any]:
+def _build_report(provider: str) -> Dict[str, Any]:
     """
-    Report on the graph build.
+    Report on one provider's graph build.
     """
     try:
-        return json.loads(
-            SETTINGS.get_build_status_path(provider.value.lower()).read_text(encoding="utf8")
-        )
+        return json.loads(SETTINGS.get_build_status_path(provider).read_text(encoding="utf8"))
     except (OSError, ValueError):
         return {"state": BuildState.UNKNOWN.value}
 
@@ -152,18 +150,14 @@ async def get_health(
             "(x-api-key header) username/password (basic auth).",
         )
 
-    # graph_reports = dict()
-    # build_reports = dict()
+    providers: Dict[str, Any] = {}
+    any_graph_available = False
+    for provider in get_deployed_providers():
+        graph = _graph_report(provider)
+        providers[provider] = {"graph": graph, "build": _build_report(provider)}
 
-    provider_reports = dict()
-    any_graph_available: bool = False
-    for provider in PROVIDERS:
-        provider_reports[provider] = dict()
-        provider_reports[provider]["graph"] = _graph_report(Providers(provider))
-        provider_reports[provider]["build"] = _build_report(Providers(provider))
-
-        # service is healthy if at least one graph is available
-        any_graph_available = any_graph_available or provider_reports[provider]["graph"]["available"]
+        # the instance is healthy as long as it can serve at least one provider
+        any_graph_available = any_graph_available or graph["available"]
 
     services = await _services_report(db, getattr(req.app.state, "redis_pool", None))
 
@@ -176,6 +170,6 @@ async def get_health(
 
     return {
         "status": "ok" if healthy else "degraded",
-        **provider_reports,
+        "providers": providers,
         "services": services,
     }

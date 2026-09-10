@@ -244,6 +244,10 @@ def update_pbf(pbf: Path) -> None:
         cmd.append("--force-update-of-old-planet")
     cmd.append(str(pbf))
 
+    # if this is 0 the user means "don't update"
+    if SETTINGS.PBF_MAX_UPDATE_PASSES == 0:
+        return
+
     for attempt in range(1, SETTINGS.PBF_MAX_UPDATE_PASSES + 1):
         BUILD_LOGGER.info(f"Updating {pbf}, pass {attempt}")
         returncode = _run(cmd, check=False)

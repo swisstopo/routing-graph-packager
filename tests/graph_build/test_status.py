@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from routing_packager_app.config import SETTINGS
 from routing_packager_app.constants import BuildStage, BuildState
 from routing_packager_app.graph_build.status import BuildStatus
 
@@ -104,3 +105,40 @@ def test_a_write_failure_never_breaks_a_build(tmp_path):
     status.stage(BuildStage.PRUNING)
 
     assert not status.path.exists()
+
+
+def test_an_unbound_status_refuses_to_write():
+    """A builder that never bound a provider has no file it could sensibly write to."""
+    with pytest.raises(RuntimeError) as e:
+        BuildStatus().stage(BuildStage.PRUNING)
+
+    assert "bind" in str(e.value)
+
+
+def test_binding_points_at_that_providers_file():
+    status = BuildStatus()
+    status.bind("tomtom")
+
+    assert status.path == SETTINGS.get_build_status_path("tomtom")
+    assert status.provider == "tomtom"
+
+
+def test_binding_starts_from_a_clean_slate(tmp_path):
+    status = BuildStatus(tmp_path.joinpath("build_status.json"))
+    status.failed("boom")
+
+    status.bind("osm")
+
+    assert status._data["state"] == BuildState.UNKNOWN.value
+    assert status._data["last_error"] is None
+
+
+def test_two_providers_write_to_separate_files():
+    osm, tomtom = BuildStatus(), BuildStatus()
+    osm.bind("osm")
+    tomtom.bind("tomtom")
+    osm.failed("osm broke")
+    tomtom.idle()
+
+    assert json.loads(osm.path.read_text())["state"] == BuildState.FAILED.value
+    assert json.loads(tomtom.path.read_text())["state"] == BuildState.IDLE.value

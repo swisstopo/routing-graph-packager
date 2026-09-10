@@ -12,7 +12,10 @@ from sqlmodel import Session, SQLModel
 from routing_packager_app import create_app
 from routing_packager_app.api_v1.models import APIPermission
 from routing_packager_app.config import SETTINGS
+from routing_packager_app.constants import PROVIDERS
+from routing_packager_app.graph_build.status import BUILD_STATUS
 from routing_packager_app.worker import create_package, update_all_packages
+from tests.utils_ import PROVIDER
 
 
 @asynccontextmanager
@@ -44,12 +47,25 @@ def get_client(get_app: FastAPI) -> TestClient:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def bind_build_status():
+    """
+    Binds the build status singleton the way a build container does at startup.
+
+    Anything reporting a build stage refuses to write while unbound, and that includes
+    ``swap_graph_link`` and ``prune_generations``, so the test session stands in for one
+    provider's builder throughout.
+    """
+    BUILD_STATUS.bind(PROVIDER)
+
+
+@pytest.fixture(scope="session", autouse=True)
 def create_db():
     from routing_packager_app.api_v1.models import User
     from routing_packager_app.db import create_tables, engine
 
     create_tables()
-    User.add_admin_user(Session(engine))
+    with Session(engine) as session:
+        User.add_admin_user(session)
     yield
     SQLModel.metadata.drop_all(engine, checkfirst=True)
 
@@ -72,8 +88,8 @@ def graph_dirs():
     Locks are named relative to ``TMP_DATA_DIR``, so a graph built somewhere under ``tmp_path``
     could not be locked at all.
     """
-    generations = SETTINGS.get_generations_dir()
-    link = SETTINGS.get_graph_link()
+    generations = SETTINGS.get_generations_dir(PROVIDER)
+    link = SETTINGS.get_graph_link(PROVIDER)
 
     def reset():
         if link.is_symlink():
@@ -128,10 +144,18 @@ def create_key_header(get_client: TestClient, basic_auth_header: dict):
         raise RuntimeError(f"Error while deleting test api keys: {e}")
 
 
-# Creates needed directories and removes them after the test function
+# Creates needed directories and removes them after the test session
 @pytest.fixture(scope="session", autouse=True)
 def handle_dirs():
-    paths = [SETTINGS.get_generations_dir(), SETTINGS.get_logging_dir()]
+    """
+    Stands in for what the graph build containers create on the shared volume.
+
+    A provider directory is what tells the app that provider is deployed, so the whole set is
+    created here: the job tests post against every provider in :class:`Providers`, and they
+    would be turned away as undeployed otherwise.
+    """
+    paths = [SETTINGS.get_provider_dir(provider) for provider in PROVIDERS]
+    paths += [SETTINGS.get_generations_dir(PROVIDER), SETTINGS.get_logging_dir()]
     for p in paths:
         p.mkdir(parents=True, exist_ok=True)
     yield

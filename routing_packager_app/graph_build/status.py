@@ -25,8 +25,12 @@ def _now() -> str:
 
 
 class BuildStatus:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path | None = None, provider: str | None = None):
         self.path = path
+        self.provider = provider
+        self._reset()
+
+    def _reset(self) -> None:
         self._last_heartbeat = 0.0
         self._stage_started: float | None = None
         self._data = {
@@ -39,6 +43,16 @@ class BuildStatus:
             "last_error": None,
         }
 
+    def bind(self, provider: str) -> None:
+        """
+        Points the status at one provider's build status file.
+
+        :param provider: the dataset provider this process builds for.
+        """
+        self.path = SETTINGS.get_build_status_path(provider)
+        self.provider = provider
+        self._reset()
+
     def _close_stage(self) -> None:
         """
         Reports how long the stage that just ended took, if one was running.
@@ -49,11 +63,11 @@ class BuildStatus:
         if self._stage_started is None:
             return
 
-        STATSD.timing(
-            "build.stage.duration",
-            (time.monotonic() - self._stage_started) * 1000,
-            tags=[f"stage:{self._data['stage']}"],
-        )
+        tags = [f"stage:{self._data['stage']}"]
+        if self.provider is not None:
+            tags.append(f"provider:{self.provider}")
+
+        STATSD.timing("build.stage.duration", (time.monotonic() - self._stage_started) * 1000, tags=tags)
         self._stage_started = None
 
     def stage(self, stage: BuildStage) -> None:
@@ -126,6 +140,9 @@ class BuildStatus:
         self._write()
 
     def _write(self) -> None:
+        if self.path is None:
+            raise RuntimeError("BuildStatus was never bound to a provider.")
+
         self._last_heartbeat = time.monotonic()
         self._data["updated_at"] = _now()
 
@@ -138,4 +155,5 @@ class BuildStatus:
             pass
 
 
-BUILD_STATUS = BuildStatus(SETTINGS.get_build_status_path())
+# bound by the build process at startup
+BUILD_STATUS = BuildStatus()

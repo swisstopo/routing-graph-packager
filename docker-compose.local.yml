@@ -1,7 +1,7 @@
 name: routing-packager-local
 
 
-x-env: &env
+x-common-env: &common-env
   POSTGRES_HOST: postgis
   POSTGRES_PORT: 5432
   POSTGRES_DB: gis
@@ -14,11 +14,7 @@ x-env: &env
   ADMIN_PASS: admin
   SSL_CERT: ""
   SSL_KEY: ""
-  GRAPH_BUILD_CRON: "*/30 * * * *"
-  GRAPH_PRUNE_TIMEOUT: 60
-  GRAPH_LOCK_TTL: 300
   PBF_URL: https://download.geofabrik.de/europe/switzerland-latest.osm.pbf
-  PBF_LOCAL_PATH: /app/tmp_data/switzerland-latest.osm.pbf
   USE_ELEVATION: "true"
   CONCURRENCY: 3
   MAX_CACHE_SIZE: 100000000
@@ -28,7 +24,6 @@ x-env: &env
 x-app: &app
   build: .
   image: routing-graph-packager:local
-  environment: *env
   healthcheck:
     disable: true
   restart: unless-stopped
@@ -64,10 +59,15 @@ services:
     ports:
       - 1080:1080
 
-  graph-build:
+  graph-build-osm:
     <<: *app
-    container_name: routing-packager-local-graph-build
-    command: graph-build
+    environment: 
+       <<: *common-env 
+       GRAPH_BUILD_CRON: "*/30 * * * *"
+       GRAPH_PRUNE_TIMEOUT: 60
+       GRAPH_LOCK_TTL: 300
+    container_name: routing-packager-local-graph-build-osm
+    command: graph-build --provider osm
     volumes:
       - ./local_data/tmp_data:/app/tmp_data
     depends_on:
@@ -78,6 +78,8 @@ services:
 
   worker:
     <<: *app
+    environment: 
+       <<: *common-env 
     container_name: routing-packager-local-worker
     command: worker
     volumes:
@@ -91,6 +93,8 @@ services:
 
   app:
     <<: *app
+    environment: 
+       <<: *common-env 
     container_name: routing-packager-local-app
     command: app
     ports:

@@ -205,6 +205,9 @@ class User(UserBase, table=True):
             admin_user = User(email=admin_email, password=admin_pass)
             session.add(admin_user)
             session.commit()
+            return
+
+        session.rollback()
 
 
 class LogType(str, Enum):

@@ -6,15 +6,16 @@ from sqlmodel import Session, select
 from routing_packager_app import SETTINGS
 from routing_packager_app.api_v1.models import Job
 from routing_packager_app.graph_build.builder import swap_graph_link
+from tests.utils_ import PROVIDER
 
 GENERATION_NAME = "20260101T000000"
 
 
 def _reset_graph():
-    link = SETTINGS.get_graph_link()
+    link = SETTINGS.get_graph_link(PROVIDER)
     if link.is_symlink():
         link.unlink()
-    rmtree(SETTINGS.get_generations_dir(), ignore_errors=True)
+    rmtree(SETTINGS.get_generations_dir(PROVIDER), ignore_errors=True)
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -45,9 +46,9 @@ def delete_dirs():
 
 @pytest.fixture(scope="function")
 def empty_graph():
-    generation = SETTINGS.get_generations_dir().joinpath(GENERATION_NAME)
+    generation = SETTINGS.get_generations_dir(PROVIDER).joinpath(GENERATION_NAME)
     generation.mkdir(parents=True)
-    swap_graph_link(SETTINGS.get_graph_link(), generation)
+    swap_graph_link(SETTINGS.get_graph_link(PROVIDER), generation)
 
     yield generation
 

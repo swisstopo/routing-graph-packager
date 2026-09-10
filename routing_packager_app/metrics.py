@@ -20,7 +20,8 @@ from prometheus_client.registry import REGISTRY
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .config import SETTINGS
-from .constants import PROVIDERS, BuildStage, BuildState
+from .constants import BuildStage, BuildState
+from .utils.file_utils import get_deployed_providers
 
 WORKER_HEALTH_KEY = default_queue_name + health_check_key_suffix
 IN_PROGRESS_PATTERN = in_progress_key_prefix + "*"
@@ -42,14 +43,15 @@ HTTP_DURATION = Histogram(
 
 PACKAGES = Counter(
     "rgp_package",
-    "Packaging jobs that finished, by outcome and whether they re-created an existing package.",
-    ["outcome", "update"],
+    "Packaging jobs that finished, by provider, outcome and whether they re-created an "
+    "existing package.",
+    ["outcome", "update", "provider"],
 )
 
 PACKAGE_DURATION = Histogram(
     "rgp_package_duration_seconds",
     "How long it took to zip a package out of the current graph generation.",
-    ["update"],
+    ["update", "provider"],
     buckets=(1, 5, 15, 30, 60, 300, 900, 1800, 3600, 7200),
 )
 
@@ -112,29 +114,33 @@ class BuildStatusCollector:
     """
 
     def collect(self) -> Iterator[GaugeMetricFamily]:
-        for provider in PROVIDERS:
+        state = GaugeMetricFamily(
+            "rgp_graph_build_state",
+            "1 on each provider's current graph build state.",
+            labels=["provider", "state"],
+        )
+        stage = GaugeMetricFamily(
+            "rgp_graph_build_stage",
+            "1 on the step a running graph build is on, all zero when none is running.",
+            labels=["provider", "stage"],
+        )
+        next_build = GaugeMetricFamily(
+            "rgp_graph_build_next_timestamp_seconds",
+            "When each provider's next graph build is due.",
+            labels=["provider"],
+        )
+
+        for provider in get_deployed_providers():
             try:
                 status = json.loads(SETTINGS.get_build_status_path(provider).read_text(encoding="utf8"))
             except (OSError, ValueError):
                 continue
 
-            state = GaugeMetricFamily(
-                "rgp_graph_build_state",
-                "1 on the graph builder's current state.",
-                labels=["state", provider],
-            )
             for value in BuildState:
-                state.add_metric([value.value], float(status.get("state") == value.value))
-            yield state
+                state.add_metric([provider, value.value], float(status.get("state") == value.value))
 
-            stage = GaugeMetricFamily(
-                "rgp_graph_build_stage",
-                "1 on the step a running graph build is on, all zero when none is running.",
-                labels=["stage", provider],
-            )
             for value in BuildStage:
-                stage.add_metric([value.value], float(status.get("stage") == value.value))
-            yield stage
+                stage.add_metric([provider, value.value], float(status.get("stage") == value.value))
 
             # absent under an external scheduler
             try:
@@ -142,12 +148,11 @@ class BuildStatusCollector:
             except (KeyError, TypeError, ValueError):
                 continue
 
-            yield GaugeMetricFamily(
-                "rgp_graph_build_next_timestamp_seconds",
-                "When the next graph build is due.",
-                value=when.timestamp(),
-                labels=[provider],
-            )
+            next_build.add_metric([provider], when.timestamp())
+
+        yield state
+        yield stage
+        yield next_build
 
 
 class WorkerCollector:

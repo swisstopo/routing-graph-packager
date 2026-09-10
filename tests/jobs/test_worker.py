@@ -1,4 +1,5 @@
 from copy import deepcopy
+import logging
 from pathlib import Path
 import shutil
 from zipfile import ZipFile
@@ -8,7 +9,8 @@ from starlette.exceptions import HTTPException
 from starlette.testclient import TestClient
 
 from routing_packager_app import SETTINGS
-from routing_packager_app.worker import create_package
+from routing_packager_app.logger import LOGGER
+from routing_packager_app.worker import create_package, update_all_packages
 
 from ..utils_ import create_new_job, create_package_params
 
@@ -125,3 +127,43 @@ async def test_a_missing_output_directory_does_not_mask_the_failure(
         await create_package(*params, False)
 
     assert e.value.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_update_all_packages_only_rebuilds_its_own_providers_packages(
+    get_client: TestClient, basic_auth_header, monkeypatch
+):
+    """
+    A build only moves one provider's graph, so the others' packages are still current.
+    """
+    # keep the SMTP handler out of it, the failures below would try to mail them
+    monkeypatch.setattr(LOGGER, "handlers", [logging.NullHandler()])
+
+    for provider in ("osm", "tomtom"):
+        create_new_job(
+            get_client,
+            {**DEFAULT_ARGS, "name": f"upd{provider}", "provider": provider, "update": True},
+            basic_auth_header,
+        )
+
+    assert (await update_all_packages({}, "osm"))["total"] == 1
+    assert (await update_all_packages({}, "tomtom"))["total"] == 1
+    assert (await update_all_packages({}, "here"))["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_update_all_packages_keeps_the_existing_package_when_it_fails(
+    get_client: TestClient, basic_auth_header, monkeypatch
+):
+    monkeypatch.setattr(LOGGER, "handlers", [logging.NullHandler()])
+
+    new_job = create_new_job(
+        get_client, {**DEFAULT_ARGS, "update": True}, basic_auth_header
+    )
+    package_dir = Path(new_job.json()["zip_path"]).parent
+    package_dir.joinpath("osm_test.zip").write_bytes(b"the package from the last build")
+
+    result = await update_all_packages({}, "osm")
+
+    assert result == {"total": 1, "succeeded": 0}
+    assert package_dir.joinpath("osm_test.zip").read_bytes() == b"the package from the last build"

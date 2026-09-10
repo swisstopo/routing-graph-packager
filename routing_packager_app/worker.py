@@ -155,8 +155,13 @@ async def create_package(
         session.commit()
 
         updated = str(update).lower()
-        PACKAGE_DURATION.labels(update=updated).observe(time.perf_counter() - started)
-        PACKAGES.labels(outcome="succeeded" if succeeded else "failed", update=updated).inc()
+        provider = job_provider.lower()
+        PACKAGE_DURATION.labels(update=updated, provider=provider).observe(time.perf_counter() - started)
+        PACKAGES.labels(
+            outcome="succeeded" if succeeded else "failed", update=updated, provider=provider
+        ).inc()
+
+        session.close()
 
 
 def _sort_jobs(jobs_: Sequence[Job]) -> List[Job]:
@@ -179,54 +184,61 @@ def _sort_jobs(jobs_: Sequence[Job]) -> List[Job]:
     ]
 
 
-async def update_all_packages(ctx):
+async def update_all_packages(ctx, provider: str):
     """
-    Recreates every package from the current graph generation.
+    Recreates one provider's packages from its current graph generation.
 
-    Enqueued by the graph build container after it swapped in a new generation. Packages are
-    rebuilt in place, sequentially, largest bbox first.
+    :param provider: the dataset provider whose graph was just rebuilt.
     """
     session: Session = next(get_db())
+    try:
+        admin = session.exec(select(User).where(User.email == SETTINGS.ADMIN_EMAIL)).first()
+        user_email = admin.email if admin is not None else ""
+        if not LOGGER.handlers and user_email:
+            handler = AppSmtpHandler(**get_smtp_details([user_email]))
+            handler.setLevel(logging.INFO)
+            LOGGER.addHandler(handler)
 
-    admin = session.exec(select(User).where(User.email == SETTINGS.ADMIN_EMAIL)).first()
-    user_email = admin.email if admin is not None else ""
-    if not LOGGER.handlers and user_email:
-        handler = AppSmtpHandler(**get_smtp_details([user_email]))
-        handler.setLevel(logging.INFO)
-        LOGGER.addHandler(handler)
+        jobs = _sort_jobs(
+            session.exec(
+                select(Job).where(Job.update == True, Job.provider == Providers(provider))  # noqa: E712
+            ).all()
+        )
+        LOGGER.info(f"Updating {len(jobs)} {provider} packages as {user_email}.")
 
-    jobs = _sort_jobs(session.exec(select(Job).where(Job.update == True)).all())  # noqa: E712
-    LOGGER.info(f"Updating {len(jobs)} packages as {user_email}.")
+        start_time = time.time()
+        succeeded = 0
+        for job in jobs:
+            try:
+                await create_package(
+                    ctx,
+                    job.id,
+                    job.arq_id,
+                    job.provider,
+                    job.description,
+                    wkbe_to_str(job.bbox),
+                    job.zip_path,
+                    job.user_id,
+                    True,
+                )
+                succeeded += 1
+            except Exception as e:
+                LOGGER.critical(
+                    f"Updating job {job.name} failed with '{e}'",
+                    extra={"user": user_email, "job_id": job.id},
+                )
 
-    start_time = time.time()
-    succeeded = 0
-    for job in jobs:
-        try:
-            await create_package(
-                ctx,
-                job.id,
-                job.arq_id,
-                job.provider,
-                job.description,
-                wkbe_to_str(job.bbox),
-                job.zip_path,
-                job.user_id,
-                True,
+        total_time = (time.time() - start_time) / 60
+        if succeeded == len(jobs):
+            LOGGER.info(f"Updated {succeeded} {provider} packages in {total_time:.1f} minutes.")
+        else:
+            LOGGER.warning(
+                f"Updated {succeeded} of {len(jobs)} {provider} packages in {total_time:.1f} minutes."
             )
-            succeeded += 1
-        except Exception as e:
-            LOGGER.critical(
-                f"Updating job {job.name} failed with '{e}'",
-                extra={"user": user_email, "job_id": job.id},
-            )
 
-    total_time = (time.time() - start_time) / 60
-    if succeeded == len(jobs):
-        LOGGER.info(f"Updated {succeeded} packages in {total_time:.1f} minutes.")
-    else:
-        LOGGER.warning(f"Updated {succeeded} of {len(jobs)} packages in {total_time:.1f} minutes.")
-
-    return {"total": len(jobs), "succeeded": succeeded}
+        return {"total": len(jobs), "succeeded": succeeded}
+    finally:
+        session.close()
 
 
 async def startup(ctx):

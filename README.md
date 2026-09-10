@@ -55,7 +55,7 @@ curl --location -XPOST 'http://localhost:5000/api/v1/jobs' \
 
 Shortly after, you should have the graph package available in `./local_data/data/output/osm_test` (format is `{privider}_{name}`.
 
-A separate `routing-packager-graph-build` container runs on the schedule set by `GRAPH_BUILD_CRON`, and on each run:
+A separate `routing-packager-graph-build-osm` container runs on the schedule set by `GRAPH_BUILD_CRON`, and on each run:
 
 - downloads a PBF (if it doesn't exist yet) or updates the PBF (if it does exist)
 - builds a Valhalla graph into a fresh generation directory
@@ -65,6 +65,45 @@ A separate `routing-packager-graph-build` container runs on the schedule set by 
 By default, also a fake SMTP server is started, and you can see incoming messages on `http://localhost:1080`.
 
 ## Concepts
+
+### Providers
+
+A **provider** is a source of routing data: `osm`, `tomtom` or `here`. Each one gets **its own graph build container**, started with `--provider`:
+
+```yaml
+# in your docker compose service def
+command: graph-build --provider osm
+```
+
+Every builder owns exactly one subtree of the shared `tmp_data` volume, `$TMP_DATA_DIR/<provider>/`.
+
+E.g., for TomTom, simply copy the source PBF into  `$TMP_DATA_DIR/<provider>/<your-tomtom.pbf>` and trigger a one-off graph build: 
+
+``` 
+docker run --rm -it \
+  --name routing-packager-local-graph-build-tomtom \
+  --network routing-packager_default \
+  -v /home/chris/dev/github/rpg/local_data/tmp_data:/app/tmp_data \
+  -e PBF_LOCAL_PATH=/app/tmp_data/tomtom/<your-tomtom>.pbf \
+  -e PBF_MAX_UPDATE_PASSES=0 \
+  -e POSTGRES_HOST=postgis \
+  -e POSTGRES_PORT=5432 \
+  -e POSTGRES_DB=gis \
+  -e POSTGRES_USER=admin \
+  -e POSTGRES_PASS=admin \
+  -e REDIS_URL=redis://redis:6379/0 \
+  -e USE_ELEVATION=true \
+  -e CONCURRENCY=3 \
+  -e MAX_CACHE_SIZE=100000000 \
+  -e GRAPH_PRUNE_TIMEOUT=60 \
+  -e GRAPH_LOCK_TTL=300 \
+  -e STATSD_HOST=statsd-exporter \
+  -e STATSD_PORT=8125 \
+  ghcr.io/swisstopo/routing-graph-packager:latest \
+  graph-build --provider tomtom --once
+```
+
+Make sure to set `PBF_MAX_UPDATE_PASSES=0` so that the graph build does not fail when pyosmium-up-to-date fails to update the data, and set `PBF_LOCAL_PATH` to the path inside the container where the PBF can be found (otherwise the container will assume its not there and download from the default OSM URL which by default is the planet). 
 
 ### Graph & OSM updates
 
@@ -99,7 +138,7 @@ Pruning of graphs is done *before* the build starts, so there are at most 2 full
 The builder normally loops in-process on `GRAPH_BUILD_CRON`, which is what the docker compose deployment wants. Where something else owns the schedule, e.g. a Kubernetes `CronJob`, simply pass `--once` instead and the container builds exactly one graph and exits:
 
 ```yaml
-args: ["graph-build", "--once"]
+args: ["graph-build", "--provider", "osm", "--once"]
 ```
 
 `GRAPH_BUILD_CRON` is not read in this mode, and does not need to be valid. The builder has no way of knowing what the external scheduler was configured with, so it does not guess: `build.next_build_at` in the `/api/v1/health` report reads `externally_controlled` instead of a timestamp.
@@ -120,7 +159,7 @@ Because 75 is non-zero, a scheduler that retries on failure will retry a run tha
 | `GRAPH_PRUNE_TIMEOUT` | `3600` | Seconds to wait for a packaging job before aborting the build |
 | `GRAPH_LOCK_TTL` | `345600` | Seconds a lock on a graph directory stays valid. A graph build that failed can only keep the graph locked up to this many seconds. |
 | `PBF_URL` | planet.openstreetmap.org | Where to download the PBF from if it is missing |
-| `PBF_LOCAL_PATH` | `$TMP_DATA_DIR/planet-latest.osm.pbf` | Where the PBF lives |
+| `PBF_LOCAL_PATH` | `$TMP_DATA_DIR/<provider>/planet-latest.osm.pbf` | Where that provider's PBF lives. Set it per graph build service, never in the shared env file: the builder updates the PBF in place, so two providers sharing one corrupt each other. |
 | `PBF_FORCE_UPDATE` | `false` | Pass `--force-update-of-old-planet`, needed for a very stale PBF |
 | `PBF_UPDATE_SIZE_MB` | `1024` | Max diff size applied per `pyosmium-up-to-date` pass |
 | `PBF_MAX_UPDATE_PASSES` | `10` | How many passes before giving up on catching up |
@@ -244,38 +283,42 @@ All three log files rotate at 10 MB and keep 10 archives. The endpoint always se
 
 It checks the four things the app itself needs to turn a submitted job into a queued one: 
 
-1. a graph exists behind the symlink
+1. at least one deployed provider has a graph behind its symlink
 2. Postgres answers
 3. Redis answers,
 4. the output directory is writable. 
 
-A fresh deployment therefore reads `503` until the first graph build has finished.
+A fresh deployment therefore reads `503` until the first graph build has finished. One provider is enough to read `200`: a job names the provider it wants, so an instance that can serve `osm` is worth sending work to even while `tomtom` is still on its first build. Use `/api/v1/health` to see per-provider detail.
 
 ### Health
 
-`GET /api/v1/health` reports the graph being served, what the graph builder is doing, and whether the backing services are reachable. **Authentication is required**: basic auth or an `internal` API key. 
+`GET /api/v1/health` reports, for every deployed provider, the graph being served and what its graph builder is doing, plus whether the backing services are reachable. **Authentication is required**: basic auth or an `internal` API key. 
 
 ```json
 {
   "status": "degraded",
-  "graph": {
-    "available": true,
-    "path": "/app/tmp_data/osm/graph",
-    "generation": "20260825T030000",
-    "built_at": "2026-08-25T04:12:56.310000+00:00",
-    "pbf_path": "/app/tmp_data/planet-latest.osm.pbf",
-    "pbf_modified": "2026-08-25T03:01:44+00:00",
-    "elevation": true,
-    "valhalla_version": "3.8.3"
-  },
-  "build": {
-    "state": "building",
-    "stage": "building_tiles",
-    "generation": "20260825T113047",
-    "started_at": "2026-08-25T11:30:47+00:00",
-    "updated_at": "2026-08-25T11:42:03+00:00",
-    "next_build_at": null,
-    "last_error": null
+  "providers": {
+    "osm": {
+      "graph": {
+        "available": true,
+        "path": "/app/tmp_data/osm/graph",
+        "generation": "20260825T030000",
+        "built_at": "2026-08-25T04:12:56.310000+00:00",
+        "pbf_path": "/app/tmp_data/osm/planet-latest.osm.pbf",
+        "pbf_modified": "2026-08-25T03:01:44+00:00",
+        "elevation": true,
+        "valhalla_version": "3.8.3"
+      },
+      "build": {
+        "state": "building",
+        "stage": "building_tiles",
+        "generation": "20260825T113047",
+        "started_at": "2026-08-25T11:30:47+00:00",
+        "updated_at": "2026-08-25T11:42:03+00:00",
+        "next_build_at": null,
+        "last_error": null
+      }
+    }
   },
   "services": {
     "postgres": {"up": true, "error": null},
@@ -293,15 +336,19 @@ A fresh deployment therefore reads `503` until the first graph build has finishe
 }
 ```
 
-`status` is `ok` when a graph is available and Postgres, Redis and the worker are all up, `degraded` otherwise. The endpoint answers `200` either way. `/api/v1/readyz` signals through the status code.
+`status` is `ok` when **at least one** provider has a graph available and Postgres, Redis and the worker are all up, `degraded` otherwise. The endpoint answers `200` either way. `/api/v1/readyz` signals through the status code.
 
-#### `graph`
+#### `providers`
 
-The generation that is currently symlinked, read from the `build_meta.json` the builder writes into it. `"available": false` means no graph has been built yet, or the symlink points at something unreadable. 
+One entry per deployed provider, keyed by its name. A provider appears here once its build container has created `$TMP_DATA_DIR/<provider>/`, so this doubles as the list of providers a job may be posted for.
 
-#### `build`
+#### `providers.<name>.graph`
 
-Read from `$TMP_DATA_DIR/<provider>/build_status.json`, which the graph build container rewrites atomically at every step.
+The generation that provider currently has symlinked, read from the `build_meta.json` its builder writes into it. `"available": false` means no graph has been built for it yet, or the symlink points at something unreadable. 
+
+#### `providers.<name>.build`
+
+Read from `$TMP_DATA_DIR/<provider>/build_status.json`, which that provider's graph build container rewrites atomically at every step.
 
 | field | meaning |
 |---|---|

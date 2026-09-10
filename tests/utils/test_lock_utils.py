@@ -12,6 +12,7 @@ from routing_packager_app.constants import LockMode
 from routing_packager_app.db import engine
 from routing_packager_app.graph_build.builder import swap_graph_link
 from routing_packager_app.utils import lock_utils
+from tests.utils_ import PROVIDER
 from routing_packager_app.utils.lock_utils import (
     lock_exclusive,
     lock_generation_shared,
@@ -21,7 +22,7 @@ from routing_packager_app.utils.lock_utils import (
 
 @pytest.fixture
 def provider_dir():
-    return SETTINGS.get_provider_dir()
+    return SETTINGS.get_provider_dir(PROVIDER)
 
 
 @pytest.fixture

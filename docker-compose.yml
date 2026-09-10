@@ -71,13 +71,15 @@ services:
     healthcheck:
       disable: true
     restart: always
-  graph-build:
+  graph-build-osm:
     image: ghcr.io/swisstopo/routing-graph-packager/routing-graph-packager:latest
-    container_name: routing-packager-graph-build
-    command: graph-build
+    container_name: routing-packager-graph-build-osm
+    command: graph-build --provider osm
     env_file:
       - .docker_env
       - .env
+    environment:
+      PBF_URL: https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
     networks:
       - routing-packager
     volumes:

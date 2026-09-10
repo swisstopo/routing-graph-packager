@@ -39,5 +39,6 @@ GRAPH_PRUNE_TIMEOUT=3600
 GRAPH_LOCK_TTL=345600
 
 USE_ELEVATION=false
-PBF_LOCAL_PATH=/app/tmp_data/planet-latest.osm.pbf
+# set this per container individually, 
+# PBF_LOCAL_PATH=
 PBF_URL=https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf

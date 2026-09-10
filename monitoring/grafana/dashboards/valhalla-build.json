@@ -6,6 +6,34 @@
   "schemaVersion": 39,
   "version": 1,
   "refresh": "1m",
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(rgp_graph_build_state, provider)",
+        "hide": 0,
+        "includeAll": false,
+        "label": "provider",
+        "multi": false,
+        "name": "provider",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(rgp_graph_build_state, provider)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
   "time": {
     "from": "now-6h",
     "to": "now"
@@ -14,7 +42,7 @@
     {
       "id": 1,
       "type": "bargauge",
-      "title": "Last build, by stage",
+      "title": "Last build, by stage ($provider)",
       "description": "Each stage valhalla_build_tiles timed in the most recent build, longest first. Stages are named module.function, because five different modules each have one called Build. util.build_tile_set is the roll-up for one whole invocation, so it is roughly the sum of the others rather than a stage of its own. Valhalla reports whole seconds, so anything under a second reads as 0.",
       "datasource": {
         "type": "prometheus",
@@ -52,7 +80,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "valhalla_build_stage_duration_seconds",
+          "expr": "valhalla_build_stage_duration_seconds{provider=\"$provider\"}",
           "legendFormat": "{{module}}.{{stage}}",
           "instant": true,
           "range": false
@@ -62,7 +90,7 @@
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Stage durations over builds",
+      "title": "Stage durations over builds ($provider)",
       "description": "One line per stage. The value is a gauge, so it holds flat between builds and steps at each new one. The table legend sorts by max, so a stage that is growing stands out.",
       "datasource": {
         "type": "prometheus",
@@ -109,7 +137,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "valhalla_build_stage_duration_seconds",
+          "expr": "valhalla_build_stage_duration_seconds{provider=\"$provider\"}",
           "legendFormat": "{{module}}.{{stage}}"
         }
       ]

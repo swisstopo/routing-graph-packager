@@ -6,9 +6,6 @@ from typing import List
 from pydantic import model_validator
 from pydantic_settings import BaseSettings as _BaseSettings
 from pydantic_settings import SettingsConfigDict
-from starlette.datastructures import CommaSeparatedStrings
-
-from routing_packager_app.constants import Providers
 
 BASE_DIR = Path(__file__).parent.parent.resolve()
 ENV_FILE = BASE_DIR.joinpath(".env")
@@ -103,14 +100,16 @@ class BaseSettings(_BaseSettings):
         """
         return self.get_provider_dir(provider).joinpath("build_status.json")
 
-    def get_pbf_path(self) -> Path:
+    def get_pbf_path(self, provider: str) -> Path:
         """
-        Return the local OSM PBF the graph is built from.
+        Return the local OSM PBF a provider's graph is built from.
+
+        :param provider: the dataset provider whose PBF to locate.
         """
         if self.PBF_LOCAL_PATH is not None:
             return Path(self.PBF_LOCAL_PATH)
 
-        return self.get_tmp_data_dir().joinpath("planet-latest.osm.pbf")
+        return self.get_provider_dir(provider).joinpath("planet-latest.osm.pbf")
 
     def get_elevation_dir(self) -> Path:
         """

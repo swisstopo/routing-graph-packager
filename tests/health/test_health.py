@@ -1,11 +1,16 @@
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from routing_packager_app.api_v1.models import APIPermission
 from routing_packager_app.config import SETTINGS
 
-from .conftest import GENERATION_NAME, FakePool
+from routing_packager_app.utils.file_utils import get_deployed_providers
+
+from tests.utils_ import PROVIDER, make_generation, reset_graph_state
+
+from .conftest import GENERATION_NAME, GRAPH_META, FakePool
 
 
 def test_fail_without_credentials(get_client: TestClient):
@@ -32,37 +37,38 @@ def test_success_with_basic_auth(get_client: TestClient, basic_auth_header: dict
     res = get_client.get("/api/v1/health", headers=basic_auth_header)
 
     assert res.status_code == 200
-    assert set(res.json()) == {"status", "graph", "build", "services"}
+    assert set(res.json()) == {"status", "providers", "services"}
+    assert set(res.json()["providers"][PROVIDER]) == {"graph", "build"}
 
 
 def test_reports_no_graph(get_client: TestClient, basic_auth_header: dict):
     res = get_client.get("/api/v1/health", headers=basic_auth_header).json()
 
-    assert res["graph"]["available"] is False
+    assert res["providers"][PROVIDER]["graph"]["available"] is False
     assert res["status"] == "degraded"
 
 
 def test_reports_the_current_generation(get_client: TestClient, basic_auth_header: dict, graph):
     res = get_client.get("/api/v1/health", headers=basic_auth_header).json()
 
-    assert res["graph"]["available"] is True
-    assert res["graph"]["generation"] == GENERATION_NAME
-    assert res["graph"]["valhalla_version"] == "3.8.3"
+    assert res["providers"][PROVIDER]["graph"]["available"] is True
+    assert res["providers"][PROVIDER]["graph"]["generation"] == GENERATION_NAME
+    assert res["providers"][PROVIDER]["graph"]["valhalla_version"] == "3.8.3"
     assert res["status"] == "ok"
 
 
 def test_reports_an_unknown_build_without_a_status_file(get_client: TestClient, basic_auth_header: dict):
     res = get_client.get("/api/v1/health", headers=basic_auth_header).json()
 
-    assert res["build"]["state"] == "unknown"
+    assert res["providers"][PROVIDER]["build"]["state"] == "unknown"
 
 
 def test_reports_the_next_build(get_client: TestClient, basic_auth_header: dict, write_status):
     write_status(state="idle", next_build_at="2026-09-01T03:00:00+00:00")
     res = get_client.get("/api/v1/health", headers=basic_auth_header).json()
 
-    assert res["build"]["state"] == "idle"
-    assert res["build"]["next_build_at"] == "2026-09-01T03:00:00+00:00"
+    assert res["providers"][PROVIDER]["build"]["state"] == "idle"
+    assert res["providers"][PROVIDER]["build"]["next_build_at"] == "2026-09-01T03:00:00+00:00"
 
 
 def test_reports_a_running_build(get_client: TestClient, basic_auth_header: dict, write_status):
@@ -74,16 +80,16 @@ def test_reports_a_running_build(get_client: TestClient, basic_auth_header: dict
     )
     res = get_client.get("/api/v1/health", headers=basic_auth_header).json()
 
-    assert res["build"]["stage"] == "building_tiles"
-    assert res["build"]["generation"] == "20260825T113047"
+    assert res["providers"][PROVIDER]["build"]["stage"] == "building_tiles"
+    assert res["providers"][PROVIDER]["build"]["generation"] == "20260825T113047"
 
 
 def test_reports_a_failed_build(get_client: TestClient, basic_auth_header: dict, write_status):
     write_status(state="failed", stage="updating_pbf", last_error="boom")
     res = get_client.get("/api/v1/health", headers=basic_auth_header).json()
 
-    assert res["build"]["state"] == "failed"
-    assert res["build"]["last_error"] == "boom"
+    assert res["providers"][PROVIDER]["build"]["state"] == "failed"
+    assert res["providers"][PROVIDER]["build"]["last_error"] == "boom"
 
 
 def test_reports_postgres_up(get_client: TestClient, basic_auth_header: dict):
@@ -153,3 +159,58 @@ def test_admin_credentials_must_match(get_client: TestClient):
     res = get_client.get("/api/v1/health", headers={"Authorization": f"Basic {wrong}"})
 
     assert res.status_code == 401
+
+
+@pytest.fixture
+def other_provider():
+    """A provider other than the one the single-provider tests use, cleaned up after."""
+    provider = next(p for p in get_deployed_providers() if p != PROVIDER)
+    yield provider
+    reset_graph_state(provider)
+
+
+def test_reports_every_deployed_provider(get_client: TestClient, basic_auth_header: dict):
+    res = get_client.get("/api/v1/health", headers=basic_auth_header).json()
+
+    assert set(res["providers"]) == set(get_deployed_providers())
+
+
+def test_each_provider_reports_its_own_graph(
+    get_client: TestClient, basic_auth_header: dict, graph, other_provider
+):
+    res = get_client.get("/api/v1/health", headers=basic_auth_header).json()
+
+    assert res["providers"][PROVIDER]["graph"]["available"] is True
+    # deployed, but its first build has not landed
+    assert res["providers"][other_provider]["graph"]["available"] is False
+    assert other_provider in res["providers"][other_provider]["graph"]["path"]
+
+
+def test_one_available_graph_is_enough_to_be_healthy(
+    get_client: TestClient, basic_auth_header: dict, graph
+):
+    res = get_client.get("/api/v1/health", headers=basic_auth_header).json()
+
+    assert res["status"] == "ok"
+
+
+def test_a_graph_from_any_provider_makes_it_healthy(
+    get_client: TestClient, basic_auth_header: dict, other_provider
+):
+    make_generation(meta=GRAPH_META, provider=other_provider)
+
+    res = get_client.get("/api/v1/health", headers=basic_auth_header).json()
+
+    assert res["status"] == "ok"
+    assert res["providers"][PROVIDER]["graph"]["available"] is False
+
+
+def test_each_provider_reports_its_own_build(
+    get_client: TestClient, basic_auth_header: dict, write_status, other_provider
+):
+    write_status(provider=other_provider, state="building", stage="building_tiles")
+
+    res = get_client.get("/api/v1/health", headers=basic_auth_header).json()
+
+    assert res["providers"][other_provider]["build"]["stage"] == "building_tiles"
+    assert res["providers"][PROVIDER]["build"]["state"] == "unknown"

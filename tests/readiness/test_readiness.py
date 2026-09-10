@@ -5,7 +5,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from routing_packager_app.config import SETTINGS
-from tests.utils_ import FakePool, write_build_status
+from routing_packager_app.utils.file_utils import get_deployed_providers, resolve_graph
+from tests.utils_ import (
+    PROVIDER,
+    FakePool,
+    make_generation,
+    reset_graph_state,
+    write_build_status,
+)
 
 URL = "/api/v1/readyz"
 
@@ -92,3 +99,27 @@ def test_a_dead_worker_stays_ready(get_client: TestClient, get_app, graph):
 def test_the_path_carries_no_trailing_slash(get_client: TestClient, graph):
     assert get_client.get(URL, follow_redirects=False).status_code == 200
     assert get_client.get(URL + "/", follow_redirects=False).status_code != 200
+
+
+def test_a_graph_from_any_deployed_provider_is_enough(get_client: TestClient):
+    """
+    A job names the provider it wants, so one graph is enough to be worth sending work to.
+    """
+    other = next(p for p in get_deployed_providers() if p != PROVIDER)
+    make_generation(provider=other)
+    try:
+        assert get_client.get(URL).status_code == 200
+    finally:
+        reset_graph_state(other)
+
+
+def test_not_ready_while_no_provider_has_built_yet(get_client: TestClient):
+    assert all(resolve_graph(p) is None for p in get_deployed_providers())
+    assert get_client.get(URL).status_code == 503
+
+
+def test_not_ready_without_a_deployed_provider(get_client: TestClient, tmp_path, monkeypatch):
+    """An empty shared volume means no build container ever started."""
+    monkeypatch.setattr(SETTINGS, "TMP_DATA_DIR", tmp_path)
+
+    assert get_client.get(URL).status_code == 503
