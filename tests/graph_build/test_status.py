@@ -112,7 +112,7 @@ def test_an_unbound_status_refuses_to_write():
     with pytest.raises(RuntimeError) as e:
         BuildStatus().stage(BuildStage.PRUNING)
 
-    assert "bind" in str(e.value)
+    assert "bound" in str(e.value)
 
 
 def test_binding_points_at_that_providers_file():
