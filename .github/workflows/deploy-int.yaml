@@ -59,7 +59,8 @@ jobs:
 
       - name: Pull latest images
         run: |
-          docker compose --profile monitoring pull
+          docker compose --profile monitoring pull postgis redis worker graph-build-osm app fake-smtp-server
+          docker compose --profile monitoring build grafana statsd-exporter prometheus
 
       - name: Deploy app
         run: |
