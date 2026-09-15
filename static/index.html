@@ -222,10 +222,12 @@
                                 <label for="name" width="300">Export name:</label>
                                 <input type="text" id="name" name="name" placeholder="Enter export name" required><br>
 
-                                <label for="provider">Provider:</label>
-                                <input type="text" id="provider" name="provider" value="osm"
-                                        style="background-color:#f3f3f3" readonly><br>
-
+								<label for="provider">Provider:</label>
+								<select id="provider" name="provider">
+								    <option value="osm" selected>osm</option>
+								    <option value="tomtom">tomtom</option>
+								</select><br>
+							
                                 <label for="bbox">Boundingbox:</label>
                                 <input type="text" id="bbox" name="bbox"
                                         placeholder="Use the map to draw the boundingbox or enter comma separated list w,s,e,n"
