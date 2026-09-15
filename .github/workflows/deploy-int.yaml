@@ -1,10 +1,10 @@
 name: Deploy -> int
   
 on:
-  workflow_run:
-    workflows: ["publish"]
-    types:
-      - completed
+  #workflow_run:
+  #  workflows: ["publish"]
+  #  types:
+  #    - completed
   workflow_dispatch:
 
 jobs:
@@ -64,5 +64,5 @@ jobs:
       - name: Deploy app
         run: |
           docker compose --profile monitoring down --remove-orphans
-          docker compose --profile monitoring up -d
+          docker compose --profile monitoring up -d --build --remove-orphans
           docker image prune -af
