@@ -58,6 +58,9 @@ jobs:
 
       - name: Deploy app
         run: |
+          echo "PWD dans le runner: $PWD"
+          ls -la monitoring/statsd_mapping.yml
+          docker run --rm -v /:/host alpine ls -la /host/home/runner/_work 2>&1 | head
           docker compose down --remove-orphans
           docker compose up -d
           docker image prune -af
