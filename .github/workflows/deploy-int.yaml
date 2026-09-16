@@ -47,6 +47,9 @@ jobs:
           HTTP_PROXY=${{ vars.HTTP_PROXY }}
           HTTPS_PROXY=${{ vars.HTTPS_PROXY }}
           NO_PROXY=${{ vars.NO_PROXY }}
+          REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+          SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+          CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
           EOF
 
           cat > .env <<EOF
