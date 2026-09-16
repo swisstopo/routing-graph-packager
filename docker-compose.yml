@@ -33,6 +33,7 @@ services:
       - SSL_MODE=off
       - SSL_CERT=
       - SSL_KEY=
+      - SSL_CERT_FILE=
     # mostly needed to define the database hosts
     env_file:
       - .docker_env
