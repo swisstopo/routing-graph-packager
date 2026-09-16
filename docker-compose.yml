@@ -30,6 +30,9 @@ services:
     environment:
       - ALLOW_IP_RANGE=0.0.0.0/0
       - POSTGRES_MULTIPLE_EXTENSIONS=postgis
+      - SSL_MODE=off
+      - SSL_CERT=
+      - SSL_KEY=
     # mostly needed to define the database hosts
     env_file:
       - .docker_env
