@@ -68,8 +68,8 @@ jobs:
       - name: Deploy app
         run: |
           docker compose --profile monitoring down --remove-orphans
-          for i in 1 2 3; do
-             docker compose --profile monitoring up -d --build --remove-orphans && break
-             echo "attempt $i failed (EAGAIN CIFS ?), retry in 5s…"; sleep 5
-          done
+          #for i in 1 2 3; do
+          docker compose --profile monitoring up -d --build --remove-orphans && break
+          #   echo "attempt $i failed (EAGAIN CIFS ?), retry in 5s…"; sleep 5
+          #done
           docker image prune -af
