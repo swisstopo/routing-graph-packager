@@ -1,8 +1,9 @@
 <!DOCTYPE html>
 <html lang="de">
 
-	
-<!-- v.1.3. 22.07.2025 bao -->
+
+<!-- v.1.4.17.09.2026  bao -->
+
 <head>
         <style>
                 html,
@@ -130,40 +131,49 @@
                         resize: none;
                 }
 
-				.dot {
-					display: inline-block;
-					width: 10px; height: 10px;
-					border-radius: 50%;
-					background: #999;
-					box-shadow: 0 0 0 1px rgba(0,0,0,.15) inset;
-				}
-				.dot.green { background: #17c964; }
-				.dot.red   { background: #f31260; }
-				
-				#apiStatusResponse { 
-					text-align: center; 
-					background-color:#f3f3f3;
-					padding-top: 1px;
-					padding-bottom: 1px;
-					margin: 10px 0px 10px 0px;
-				}
-				
-				#h1id { text-align: center}
+                .dot {
+                        display: inline-block;
+                        width: 10px;
+                        height: 10px;
+                        border-radius: 50%;
+                        background: #999;
+                        box-shadow: 0 0 0 1px rgba(0, 0, 0, .15) inset;
+                }
 
+                .dot.green {
+                        background: #17c964;
+                }
+
+                .dot.red {
+                        background: #f31260;
+                }
+
+                #apiStatusResponse {
+                        text-align: center;
+                        background-color: #f3f3f3;
+                        padding-top: 1px;
+                        padding-bottom: 1px;
+                        margin: 10px 0px 10px 0px;
+                }
+
+                #h1id {
+                        text-align: center
+                }
         </style>
 
         <title id="titleid"></title>
-        
-		
-	   <div id="apiStatusResponse">
-			<h2 id="h1id"></h2>
-			<h3>
-				<span>Server Status: </span>
-				<span class="status">8002: <span id="s8002" class="dot"></span></span>
-				<span class="status">8003: <span id="s8003" class="dot"></span></span>
-			</h3>
-	   </div>
-		
+
+
+        <div id="apiStatusResponse">
+                <h2 id="h1id"></h2>
+                <h3>
+                        <span>Server Status: </span>
+                        <span class="status">Ready: <span id="readyStatus" class="dot"></span></span>
+                        &nbsp;&nbsp;
+                        <span class="status">Health: <span id="healthStatus" class="dot"></span></span>
+                </h3>
+        </div>
+
 
         <!-- Leaflet CSS file -->
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -193,22 +203,22 @@
                 var hostlocation = window.location.origin;
                 var hostname = window.location.hostname;
 
-                // ############################## config  ############################## 
+                // ############################## config  ##############################
 
                 // Authentication header, provide key with internal permission
-			    const params = new URLSearchParams(window.location.search);
-    			const apikey = params.get("api_key");
-				if (!apikey) {
-			      alert("Please provide an api key. index.html?api_key=***");
-			    }
+                const params = new URLSearchParams(window.location.search);
+                const apikey = params.get("api_key");
+                if (!apikey) {
+                        alert("Please provide an api key. index.html?api_key=***");
+                }
                 // url path for jobs endpoint (provive full path when debugging localy)
-                var postjobsurl = hostlocation.concat("/api/v1/jobs/"); 
+                var postjobsurl = hostlocation.concat("/api/v1/jobs/");
 
                 // url path for logs endpoint (provive full path when debugging localy)
                 var logsBaseURL = hostlocation.concat("/api/v1/logs/");
-			    var healthBaseURL = hostlocation.concat("/api/v1/health");
+                var healthBaseURL = hostlocation.concat("/api/v1/health");
 
-                // ###################################################################### 
+                // ######################################################################
 
         </script>
         <div style="width: 100%; height:830px">
@@ -222,12 +232,12 @@
                                 <label for="name" width="300">Export name:</label>
                                 <input type="text" id="name" name="name" placeholder="Enter export name" required><br>
 
-								<label for="provider">Provider:</label>
-								<select id="provider" name="provider">
-								    <option value="osm" selected>osm</option>
-								    <option value="tomtom">tomtom</option>
-								</select><br>
-							
+                                <label for="provider">Provider:</label>
+                                <select id="provider" name="provider">
+                                        <option value="osm" selected>osm</option>
+                                        <option value="tomtom">tomtom</option>
+                                </select><br>
+
                                 <label for="bbox">Boundingbox:</label>
                                 <input type="text" id="bbox" name="bbox"
                                         placeholder="Use the map to draw the boundingbox or enter comma separated list w,s,e,n"
@@ -247,7 +257,7 @@
                         <script>
 
                                 document.getElementById("titleid").innerHTML = "KARP GUI ".concat(hostname);
-								document.getElementById("h1id").innerHTML = "KARP " + hostname
+                                document.getElementById("h1id").innerHTML = "KARP " + hostname
 
                                 // Variables for extent
                                 var sw = 0.0;
@@ -572,8 +582,8 @@
                                         };
                                 </script>
                         </div>
-						
-						
+
+
                         <!-- Logs right, below table -->
                         <div id="apiLogResponse" style="height: 415px">
                                 <br>
@@ -581,8 +591,8 @@
                                 <!-- links with different endpoints -->
                                 <a id="workerLogLink" href="#">worker</a>&nbsp;&nbsp;&nbsp;&nbsp;<a id="appLogLink"
                                         href="#">app</a>&nbsp;&nbsp;&nbsp;&nbsp;<a id="builderLogLink"
-                                        href="#">builder</a>&nbsp;&nbsp;&nbsp;&nbsp;<a id="supervisorLogLink"
-                                        href="#">supervisor</a>
+                                        href="#">builder</a>&nbsp;&nbsp;&nbsp;&nbsp;<a id="healthLink"
+                                        href="#">health</a>
 
 
                                 <div id="response-container">
@@ -591,49 +601,79 @@
                                         <!-- Response content appears here -->
                                 </div>
                                 <script>
-										function setDot(el, code) {
-										    el.classList.remove('green', 'red');
-										    if (code === 200) {
-											    el.classList.add('green');
-										    } else {
-											    el.classList.add('red');
-										    }
-										}
-												
+                                        function setDot(el, state) {
+                                                el.classList.remove('green', 'red');
+                                                if (state) {
+                                                        el.classList.add('green');
+                                                } else {
+                                                        el.classList.add('red');
+                                                }
+                                        }
                                         $(document).ready(function () {
-												//fill in statuses
-												$.ajax({
-														url: healthBaseURL,
-														type: "GET",
-														headers: {
-															"x-api-key": apikey,
-															},
-														crossDomain: true,														
-														success: function (data) {
-															const map = data.valhalla || {};
-															setDot(document.getElementById('s8002'), map["8002"]);
-															setDot(document.getElementById('s8003'), map["8003"]);
-														},
-														error: function () {
-															setDot(document.getElementById('s8002'), 0);
-														    setDot(document.getElementById('s8003'), 0);
-														}
-												});
-												
+                                                // Ready status
+                                                $.ajax({
+                                                        url: hostlocation + "/api/v1/readyz",
+                                                        type: "GET",
+                                                        crossDomain: true,
+                                                        success: function (data) {
+                                                                setDot(
+                                                                        document.getElementById('readyStatus'),
+                                                                        data.ready === true
+                                                                );
+                                                        },
+                                                        error: function () {
+                                                                setDot(
+                                                                        document.getElementById('readyStatus'),
+                                                                        false
+                                                                );
+                                                        }
+                                                });
+
+                                                // Health status
+                                                $.ajax({
+                                                        url: healthBaseURL,
+                                                        type: "GET",
+                                                        headers: {
+                                                                "x-api-key": apikey,
+                                                        },
+                                                        crossDomain: true,
+                                                        success: function (data) {
+                                                                setDot(
+                                                                        document.getElementById('healthStatus'),
+                                                                        data.status === "ok"
+                                                                );
+                                                        },
+                                                        error: function () {
+                                                                setDot(
+                                                                        document.getElementById('healthStatus'),
+                                                                        false
+                                                                );
+                                                        }
+                                                });
+
+
+
+
+
                                                 // openLink function
                                                 function openLink(event, endpoint) {
                                                         event.preventDefault();
 
-                                                        var fullURL = logsBaseURL + endpoint;
+                                                        var fullURL;
+                                                        if (endpoint === "health") {
+                                                                fullURL = healthBaseURL;
+                                                        } else {
+                                                                fullURL = logsBaseURL + endpoint;
+                                                        }
 
                                                         // GET request with jQuery AJAX
                                                         $.ajax({
                                                                 url: fullURL,
                                                                 type: "GET",
-																headers: {
-																	"x-api-key": apikey,
-																	},
-                                                                crossDomain: true,														
+                                                                headers: {
+                                                                        "x-api-key": apikey,
+                                                                },
+                                                                crossDomain: true,
                                                                 success: function (data) {
                                                                         // Check if the response container is available
                                                                         var responseDataElement = document.getElementById("response-data");
@@ -644,7 +684,7 @@
                                                                                         .replace(/\\n/g, '\n');
 
                                                                                 // Display the highlighted data in the response container
-                                                                                responseDataElement.innerHTML = formattedData;
+                                                                                responseDataElement.value = formattedData;
                                                                         }
                                                                         // only show respons data box when logs are shown
                                                                         document.getElementById("response-data").removeAttribute("hidden");
@@ -662,7 +702,8 @@
                                                 $('#workerLogLink').on('click', function (event) { openLink(event, 'worker'); });
                                                 $('#appLogLink').on('click', function (event) { openLink(event, 'app'); });
                                                 $('#builderLogLink').on('click', function (event) { openLink(event, 'builder'); });
-											    $('#supervisorLogLink').on('click', function (event) { openLink(event, 'supervisor'); });
+                                                $('#healthLink').on('click', function (event) { openLink(event, 'health'); });
+
                                         });
                                 </script>
                         </div>
