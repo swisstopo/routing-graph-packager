@@ -1,6 +1,6 @@
 name: Deploy -> prod
+  
 on:
-  #only manual trigger
   workflow_dispatch:
 
 jobs:
@@ -43,6 +43,9 @@ jobs:
           HTTP_PROXY=${{ vars.HTTP_PROXY }}
           HTTPS_PROXY=${{ vars.HTTPS_PROXY }}
           NO_PROXY=${{ vars.NO_PROXY }}
+          REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+          SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+          CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
           EOF
 
           cat > .env <<EOF
@@ -55,10 +58,13 @@ jobs:
 
       - name: Pull latest images
         run: |
-          docker compose --profile monitoring pull
+          docker compose --profile monitoring pull postgis redis worker graph-build-osm app fake-smtp-server
+          docker compose --profile monitoring build grafana statsd-exporter prometheus
 
       - name: Deploy app
         run: |
           docker compose --profile monitoring down --remove-orphans
-          docker compose --profile monitoring up -d
-          docker image prune -af
+          docker compose --profile monitoring up -d --build --remove-orphans && break
+      - name: Cleanup old images
+        run: |
+          docker image prune -af --filter "until=168h"
