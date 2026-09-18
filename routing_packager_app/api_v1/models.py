@@ -39,6 +39,7 @@ class APIKeysUpdate(SQLModel):
 class APIKeysCreate(APIKeysBase):
     permission: APIPermission
     validity_days: int
+    key: str | None = None
 
 
 class APIKeysRead(APIKeysBase):
