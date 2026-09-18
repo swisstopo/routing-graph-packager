@@ -45,3 +45,8 @@ jobs:
             -o "$PLUGIN_DIR/docker-compose"
           chmod +x "$PLUGIN_DIR/docker-compose"
           docker compose version
+
+      - name: Start runner
+        run: |
+          cd ~/src/mgdi-runner
+          docker compose up -d
