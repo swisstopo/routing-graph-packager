@@ -1,4 +1,4 @@
-name: Update Docker & Compose
+name: Update Int
 
 on:
   workflow_dispatch:
