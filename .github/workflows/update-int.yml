@@ -10,6 +10,7 @@ jobs:
     steps:
       - name: Update Docker
         run: |
+          sudo -u kadas sudosh
           serviceswitch
           export HTTPS_PROXY=http://prxp01.admin.ch:8080
 
