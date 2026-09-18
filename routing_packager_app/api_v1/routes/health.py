@@ -143,13 +143,6 @@ async def get_health(
     auth: HTTPBasicCredentials = Depends(BasicAuth),
     key: str = Depends(HeaderKey),
 ):
-    if not _authenticate(db, auth, key):
-        raise HTTPException(
-            HTTP_401_UNAUTHORIZED,
-            "No valid authentication method provided. Possible authentication methods: API key"
-            "(x-api-key header) username/password (basic auth).",
-        )
-
     providers: Dict[str, Any] = {}
     any_graph_available = False
     for provider in get_deployed_providers():
