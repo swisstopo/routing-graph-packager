@@ -39,7 +39,10 @@ class APIKeysUpdate(SQLModel):
 class APIKeysCreate(APIKeysBase):
     permission: APIPermission
     validity_days: int
-    key: str | None = None
+    key: str | None = Field(
+        default=None,
+        description="Key value. If none, auto generated.",
+    )
 
 
 class APIKeysRead(APIKeysBase):
