@@ -292,7 +292,7 @@ A fresh deployment therefore reads `503` until the first graph build has finishe
 
 ### Health
 
-`GET /api/v1/health` reports, for every deployed provider, the graph being served and what its graph builder is doing, plus whether the backing services are reachable. **Authentication is required**: basic auth or an `internal` API key. 
+`GET /api/v1/health` reports, for every deployed provider, the graph being served and what its graph builder is doing, plus whether the backing services are reachable. No Authentication is required. 
 
 ```json
 {
