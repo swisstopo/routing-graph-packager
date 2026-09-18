@@ -3,11 +3,9 @@ import sys
 from pathlib import Path
 from typing import List
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings as _BaseSettings
 from pydantic_settings import SettingsConfigDict
-from starlette.datastructures import CommaSeparatedStrings
-
-from routing_packager_app.constants import Providers
 
 BASE_DIR = Path(__file__).parent.parent.resolve()
 ENV_FILE = BASE_DIR.joinpath(".env")
@@ -27,9 +25,19 @@ class BaseSettings(_BaseSettings):
 
     DATA_DIR: Path = BASE_DIR.joinpath("data")
     TMP_DATA_DIR: Path = BASE_DIR.joinpath("tmp_data")
-    VALHALLA_URL: str = "http://localhost"
 
-    ENABLED_PROVIDERS: list[str] = list(CommaSeparatedStrings("osm,tomtom"))
+    # GRAPH BUILD ###
+    GRAPH_BUILD_CRON: str = "0 3 * * 0"  # 03:00 AM every Sunday
+    GRAPH_PRUNE_TIMEOUT: int = 3600
+    GRAPH_LOCK_TTL: int = 345600
+    PBF_LOCAL_PATH: Path | None = None
+    PBF_URL: str = "https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf"
+    PBF_FORCE_UPDATE: bool = False
+    PBF_MAX_UPDATE_PASSES: int = 10
+    PBF_UPDATE_SIZE_MB: int = 1024
+    USE_ELEVATION: bool = False
+    CONCURRENCY: int = 8
+    MAX_CACHE_SIZE: int = 1000000000
 
     # DATABASES ###
     POSTGRES_HOST: str = "postgis"
@@ -38,6 +46,12 @@ class BaseSettings(_BaseSettings):
     POSTGRES_USER: str = "docker"
     POSTGRES_PASS: str = "docker"
     REDIS_URL: str = "redis://localhost"
+
+    # MONITORING ###
+    METRICS_PORT: int = 9101
+    STATSD_HOST: str = ""
+    STATSD_PORT: int = 8125
+    STATSD_PREFIX: str = "rgp"
 
     # SMTP ###
     SMTP_HOST: str = "localhost"
@@ -49,15 +63,59 @@ class BaseSettings(_BaseSettings):
 
     model_config = SettingsConfigDict(extra="ignore")
 
-    def get_valhalla_path(self, port: int) -> Path:  # pragma: no cover
+    @model_validator(mode="before")
+    @classmethod
+    def _ignore_empty_env_vars(cls, data):
         """
-        Return the path to the OSM Valhalla instances.
+        Falls back to the defaults for env vars that are set but empty.
         """
-        if port in (8002, 8003):
-            p = self.get_tmp_data_dir().joinpath(Providers.OSM.lower(), str(port))
-            p.mkdir(exist_ok=True, parents=True)
-            return p
-        raise ValueError(f"{port} is not a valid port for Valhalla.")
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if v != ""}
+
+        return data
+
+    def get_provider_dir(self, provider: str) -> Path:
+        """
+        Return the root directory holding one provider's graph generations.
+        """
+        return self.get_tmp_data_dir().joinpath(provider)
+
+    def get_graph_link(self, provider: str) -> Path:
+        """
+        Return the symlink pointing at the generation currently served to packaging jobs.
+        """
+        return self.get_provider_dir(provider).joinpath("graph")
+
+    def get_generations_dir(self, provider: str) -> Path:
+        """
+        Return the directory holding every built graph generation for a provider.
+        """
+        return self.get_provider_dir(provider).joinpath("generations")
+
+    def get_build_status_path(self, provider: str) -> Path:
+        """
+        Return the file the graph builder publishes its current stage to. It's
+        a small JSON file that the graph builder continuously updates, which
+        serves as a way to let the API report on the builder's status.
+        """
+        return self.get_provider_dir(provider).joinpath("build_status.json")
+
+    def get_pbf_path(self, provider: str) -> Path:
+        """
+        Return the local OSM PBF a provider's graph is built from.
+
+        :param provider: the dataset provider whose PBF to locate.
+        """
+        if self.PBF_LOCAL_PATH is not None:
+            return Path(self.PBF_LOCAL_PATH)
+
+        return self.get_provider_dir(provider).joinpath("planet-latest.osm.pbf")
+
+    def get_elevation_dir(self) -> Path:
+        """
+        Return the elevation tile directory, shared across all graph generations.
+        """
+        return self.get_tmp_data_dir().joinpath("elevation")
 
     def get_output_path(self) -> Path:
         return self.get_data_dir().joinpath("output")
@@ -82,7 +140,7 @@ class BaseSettings(_BaseSettings):
 
     def get_logging_dir(self) -> Path:
         """
-        Gets the path where logs are stored for both worker and builder/app
+        Gets the path where logs are stored for the worker, the graph builder and the app
         """
         tmp_data_dir = self.TMP_DATA_DIR
         if os.path.isdir("/app") and not os.getenv("CI", None):  # pragma: no cover

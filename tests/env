@@ -6,8 +6,6 @@ ADMIN_PASS=admin
 DATA_DIR=${PWD}/tests/data
 TMP_DATA_DIR=${PWD}/tests/tmp_data
 
-VALHALLA_SERVER_IP="http://localhost"
-
 POSTGRES_USER=admin
 POSTGRES_PASS=admin
 

@@ -15,6 +15,7 @@ tests/
 !DESCRIPTION.md
 **/*.yaml
 docker-compose.yml
+docker-compose.local.yml
 *.cfg
 
 .env

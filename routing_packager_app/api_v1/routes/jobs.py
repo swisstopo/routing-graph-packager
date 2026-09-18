@@ -9,6 +9,7 @@ from fastapi.security import HTTPBasicCredentials
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.status import (
+    HTTP_400_BAD_REQUEST,
     HTTP_401_UNAUTHORIZED,
     HTTP_409_CONFLICT,
     HTTP_204_NO_CONTENT,
@@ -25,7 +26,7 @@ from ...db import get_db
 from ...config import SETTINGS, TestSettings
 from ..auth import BasicAuth, HeaderKey
 from ...utils.geom_utils import bbox_to_wkt
-from ...utils.file_utils import make_package_path
+from ...utils.file_utils import get_deployed_providers, make_package_path
 from ...constants import Providers, Statuses
 
 router = APIRouter()
@@ -101,6 +102,14 @@ async def post_job(
     bbox_str = job.bbox
     job.bbox = bbox_to_wkt(split_bbox(bbox_str))
 
+    deployed = get_deployed_providers()
+    if job.provider.lower() not in deployed:
+        raise HTTPException(
+            HTTP_400_BAD_REQUEST,
+            f"No graph build is deployed for provider '{job.provider.lower()}'. "
+            f"Deployed providers: {', '.join(deployed) if deployed else 'none'}.",
+        )
+
     try:
         zip_path = make_package_path(SETTINGS.get_output_path(), job.name, job.provider.lower())
         arq_id = zip_path.stem
@@ -123,12 +132,13 @@ async def post_job(
         pool: ArqRedis = req.app.state.redis_pool
         await pool.enqueue_job(
             "create_package",
-            db_job.id,
-            db_job.arq_id,
-            db_job.description,
-            bbox_str,
-            str(zip_path.resolve()),
-            user_id,
+            job_id=db_job.id,
+            job_name=db_job.arq_id,
+            job_provider=db_job.provider,
+            description=db_job.description,
+            bbox=bbox_str,
+            zip_path=str(zip_path.resolve()),
+            user_id=user_id,
             _job_id=db_job.arq_id,
         )
 
@@ -174,10 +184,10 @@ async def delete_job(
     key: str = Depends(HeaderKey),
 ):
     """DELETE a single job. Will also stop the job if it's in progress. Needs admin privileges."""
-    
+
     # check api key is valid and active
     matched_key = APIKeys.check_key(db, key, APIPermission.INTERNAL)
-    
+
     # first authenticate
     req_user = User.get_user(db, auth)
     if not req_user and not matched_key:

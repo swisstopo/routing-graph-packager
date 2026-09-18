@@ -61,6 +61,10 @@ def get_smtp_details(toaddrs: List[str]):
     return conf
 
 
+# for the log rotation
+LOG_MAX_BYTES = 10 * 1024 * 1024
+LOG_BACKUP_COUNT = 10
+
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -87,17 +91,33 @@ LOGGING_CONFIG = {
             "propagate": True,
             "qualname": "gunicorn.access",
         },
+        "builder": {
+            "level": "INFO",
+            "handlers": ["builder"],
+            "propagate": True,
+        },
     },
     "handlers": {
         "worker": {
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "formatter": "worker",
             "filename": str(SETTINGS.get_logging_dir() / "worker.log"),
+            "maxBytes": LOG_MAX_BYTES,
+            "backupCount": LOG_BACKUP_COUNT,
         },
         "app": {
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "formatter": "app",
             "filename": str(SETTINGS.get_logging_dir() / "app.log"),
+            "maxBytes": LOG_MAX_BYTES,
+            "backupCount": LOG_BACKUP_COUNT,
+        },
+        "builder": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "formatter": "builder",
+            "filename": str(SETTINGS.get_logging_dir() / "builder.log"),
+            "maxBytes": LOG_MAX_BYTES,
+            "backupCount": LOG_BACKUP_COUNT,
         },
         "default": {"class": "logging.StreamHandler", "formatter": "std", "stream": "ext://sys.stdout"},
     },
@@ -112,9 +132,25 @@ LOGGING_CONFIG = {
             "datefmt": "[%Y-%m-%d %H:%M:%S %z]",
             "class": "logging.Formatter",
         },
+        "builder": {
+            "format": "build_loop: %(asctime)s [%(process)d] [%(levelname)s] %(message)s",
+            "datefmt": "[%Y-%m-%d %H:%M:%S %z]",
+            "class": "logging.Formatter",
+        },
         "std": {"format": "%(asctime)s [%(process)d] [%(levelname)s] %(message)s"},
     },
 }
 
+# show Arq logs in the worker logs
+ARQ_LOGGING_CONFIG = {
+    **LOGGING_CONFIG,
+    "loggers": {
+        **LOGGING_CONFIG["loggers"],
+        "arq": {"level": "INFO", "handlers": ["worker"], "propagate": True},
+    },
+}
+
+
 config.dictConfig(LOGGING_CONFIG)
 LOGGER = logging.getLogger("worker")
+BUILD_LOGGER = logging.getLogger("builder")

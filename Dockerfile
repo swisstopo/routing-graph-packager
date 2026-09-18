@@ -1,6 +1,6 @@
 #--- BEGIN Usual Python stuff ---
 
-FROM ghcr.io/valhalla/valhalla:latest AS builder
+FROM ghcr.io/valhalla/valhalla:3.8.3 AS builder
 LABEL org.opencontainers.image.authors="Nils Nolde <nils@gis-ops.com>, Christian Beiwinkel <chrstn@bwnkl.de>"
 
 WORKDIR /app
@@ -32,7 +32,7 @@ RUN . app_venv/bin/activate && ${UV_BIN} pip install --editable . && mkdir -p /a
 # Do some Valhalla stuff
 # remove some stuff from the original image
 RUN cd /usr/local/bin && \
-  preserve="valhalla_service valhalla_build_tiles valhalla_build_config valhalla_build_admins valhalla_build_timezones valhalla_build_elevation valhalla_ways_to_edges valhalla_build_extract valhalla_export_edges valhalla_add_predicted_traffic" && \
+  preserve="valhalla_build_tiles valhalla_build_config valhalla_build_admins valhalla_build_timezones valhalla_build_elevation valhalla_ways_to_edges valhalla_build_extract valhalla_export_edges valhalla_add_predicted_traffic" && \
   mv $preserve .. && \
   for f in valhalla*; do rm $f; done && \
   cd .. && mv $preserve ./bin
@@ -45,30 +45,25 @@ RUN apt-get update > /dev/null && \
   export DEBIAN_FRONTEND=noninteractive && \
   apt-get install -y libluajit-5.1-dev \
   libzmq5 libgdal-dev libczmq4 spatialite-bin libprotobuf-lite32 sudo locales wget \
-  libsqlite3-0 libsqlite3-mod-spatialite libcurl4 python-is-python3 osmctools \
-  python3.12-minimal curl unzip moreutils jq spatialite-bin supervisor > /dev/null
+  libsqlite3-0 libsqlite3-mod-spatialite libcurl4 python-is-python3 \
+  python3.12-minimal curl unzip moreutils jq spatialite-bin > /dev/null
 
 WORKDIR /app
 
 ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
-# export the True defaults
-ENV use_tiles_ignore_pbf=True
-ENV build_tar=True
-ENV serve_tiles=True
 
 COPY . .
 
 COPY --from=builder /usr/local /usr/local
 COPY --from=builder /app/app_venv /app/app_venv
 COPY --from=builder /app/scripts/* /usr/local/bin/
-COPY --from=builder /app/conf/* /etc/supervisor/conf.d/
 
-# add the root cert for https://ftp5.gwdg.de/pub/misc/openstreetmap/planet.openstreetmap.org/, so osmupdate can download stuff
+# add the root cert for https://ftp5.gwdg.de/pub/misc/openstreetmap/planet.openstreetmap.org/, so the planet download works
 RUN mv /app/ssl/gwdg_root_cert.crt /usr/local/share/ca-certificates && \
   update-ca-certificates
 
 EXPOSE 5000
-HEALTHCHECK --start-period=5s CMD curl --fail -s http://localhost:5000/api/v1/jobs || exit 1
+HEALTHCHECK --start-period=5s CMD curl --fail -s http://localhost:5000/api/v1/readyz || exit 1
 
 # Start gunicorn
 ENTRYPOINT ["docker-entrypoint.sh"]

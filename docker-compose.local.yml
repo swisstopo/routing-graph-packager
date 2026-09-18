@@ -1,0 +1,158 @@
+name: routing-packager-local
+
+
+x-common-env: &common-env
+  POSTGRES_HOST: postgis
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: gis
+  POSTGRES_USER: admin
+  POSTGRES_PASS: admin
+  REDIS_URL: redis://redis:6379/0
+  SMTP_HOST: fake-smtp-server
+  SMTP_PORT: 1025
+  ADMIN_EMAIL: admin@example.org
+  ADMIN_PASS: admin
+  SSL_CERT: ""
+  SSL_KEY: ""
+  PBF_URL: https://download.geofabrik.de/europe/switzerland-latest.osm.pbf
+  USE_ELEVATION: "true"
+  CONCURRENCY: 3
+  MAX_CACHE_SIZE: 100000000
+  STATSD_HOST: statsd-exporter
+  STATSD_PORT: 8125
+
+x-app: &app
+  build: .
+  image: routing-graph-packager:local
+  healthcheck:
+    disable: true
+  restart: unless-stopped
+
+services:
+  postgis:
+    image: kartoza/postgis:12.1
+    container_name: routing-packager-local-postgis
+    environment:
+      ALLOW_IP_RANGE: 0.0.0.0/0
+      POSTGRES_MULTIPLE_EXTENSIONS: postgis
+      POSTGRES_DB: gis
+      POSTGRES_USER: admin
+      POSTGRES_PASS: admin
+    ports:
+      - 5555:5432
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=admin psql -h 127.0.0.1 -U admin -d gis -c 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      retries: 30
+
+  redis:
+    image: redis:6.2
+    container_name: routing-packager-local-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 30
+
+  fake-smtp-server:
+    image: reachfive/fake-smtp-server:latest
+    container_name: routing-packager-local-smtp
+    ports:
+      - 1080:1080
+
+  graph-build-osm:
+    <<: *app
+    environment: 
+       <<: *common-env 
+       GRAPH_BUILD_CRON: "*/30 * * * *"
+       GRAPH_PRUNE_TIMEOUT: 60
+       GRAPH_LOCK_TTL: 300
+    container_name: routing-packager-local-graph-build-osm
+    command: graph-build --provider osm
+    volumes:
+      - ./local_data/tmp_data:/app/tmp_data
+    depends_on:
+      postgis:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *app
+    environment: 
+       <<: *common-env 
+    container_name: routing-packager-local-worker
+    command: worker
+    volumes:
+      - ./local_data/data:/app/data
+      - ./local_data/tmp_data:/app/tmp_data
+    depends_on:
+      postgis:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  app:
+    <<: *app
+    environment: 
+       <<: *common-env 
+    container_name: routing-packager-local-app
+    command: app
+    ports:
+      - 5000:5000
+      - 8125:8125
+      - 9101:9101
+    volumes:
+      - ./local_data/data:/app/data
+      - ./local_data/tmp_data:/app/tmp_data
+    depends_on:
+      postgis:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  statsd-exporter:
+    image: prom/statsd-exporter:v0.28.0
+    container_name: routing-packager-local-statsd-exporter
+    command:
+      - --statsd.mapping-config=/etc/statsd/mapping.yml
+      - --statsd.listen-udp=:8125
+      - --statsd.parse-dogstatsd-tags
+      - --web.listen-address=:9102
+    volumes:
+      - ./monitoring/statsd_mapping.yml:/etc/statsd/mapping.yml:ro
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.6.0
+    container_name: routing-packager-local-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=90d
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - 9090:9090
+    depends_on:
+      - statsd-exporter
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    container_name: routing-packager-local-grafana
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - 3000:3000
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:

@@ -1,10 +1,6 @@
 name: Deploy -> int
   
 on:
-  #workflow_run:
-  #  workflows: ["publish"]
-  #  types:
-  #    - completed
   workflow_dispatch:
 
 jobs:
@@ -18,7 +14,7 @@ jobs:
       - name: Set up Docker
         run: |
           docker --version
-          docker compose --version
+          docker compose version
 
       - name: Generate .docker_env file
         run: |
@@ -28,7 +24,6 @@ jobs:
           REDIS_URL=${{ vars.REDIS_URL }}
           ADMIN_EMAIL=${{ vars.ADMIN_EMAIL }}
           ADMIN_PASS=${{ secrets.ADMIN_PASS }}
-          VALHALLA_URL=${{ vars.VALHALLA_URL }}
           POSTGRES_DB=${{ vars.POSTGRES_DB }}
           POSTGRES_USER=${{ vars.POSTGRES_USER }}
           POSTGRES_PASS=${{ secrets.POSTGRES_PASS }}
@@ -39,9 +34,18 @@ jobs:
           USE_ELEVATION=${{ vars.USE_ELEVATION }}
           PBF_LOCAL_PATH=${{ vars.PBF_LOCAL_PATH }}
           PBF_URL=${{ vars.PBF_URL }}
+          GRAPH_BUILD_CRON=${{ vars.GRAPH_BUILD_CRON || '0 6 * * 2' }}
+          GRAPH_PRUNE_TIMEOUT=${{ vars.GRAPH_PRUNE_TIMEOUT || '3600' }}
+          GRAPH_LOCK_TTL=${{ vars.GRAPH_LOCK_TTL || '345600' }}
+          STATSD_HOST=statsd-exporter
+          GF_SECURITY_ADMIN_USER=${{ vars.GRAFANA_ADMIN_USER || 'admin' }}
+          GF_SECURITY_ADMIN_PASSWORD=${{ secrets.GRAFANA_ADMIN_PASS }}
           HTTP_PROXY=${{ vars.HTTP_PROXY }}
           HTTPS_PROXY=${{ vars.HTTPS_PROXY }}
           NO_PROXY=${{ vars.NO_PROXY }}
+          REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+          SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+          CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
           EOF
 
           cat > .env <<EOF
@@ -54,14 +58,13 @@ jobs:
 
       - name: Pull latest images
         run: |
-          docker compose pull
+          docker compose --profile monitoring pull postgis redis worker graph-build-osm app fake-smtp-server
+          docker compose --profile monitoring build grafana statsd-exporter prometheus
 
       - name: Deploy app
         run: |
-          echo "PWD dans le runner: $PWD"
-          ls -la monitoring/statsd_mapping.yml
-          docker run --rm -v /:/host alpine ls -la /host/home/runner/_work 2>&1 | head
-          docker compose down --remove-orphans
-          #docker compose up -d
-          docker compose --profile monitoring up -d --build --remove-orphans
-          docker image prune -af
+          docker compose --profile monitoring down --remove-orphans
+          docker compose --profile monitoring up -d --build --remove-orphans && break
+      - name: Cleanup old images
+        run: |
+          docker image prune -af --filter "until=168h"

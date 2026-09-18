@@ -60,7 +60,7 @@ def post_key(
     if not User.get_user(db, auth):
         raise HTTPException(HTTP_401_UNAUTHORIZED, "Wrong username or password.")
 
-    generated_key = secrets.token_urlsafe(16)
+    generated_key = key.key or secrets.token_urlsafe(16)
     hashed_key = hmac_hash(generated_key)
     key_db = APIKeys.model_validate(
         key,
@@ -100,7 +100,7 @@ def get_key(
 
 
 @router.patch("/{key_id}", response_model=APIKeysRead)
-def modify_key(
+def patch_key(
     key_id,
     key_update: APIKeysUpdate,
     db: Session = Depends(get_db),
@@ -131,7 +131,7 @@ def modify_key(
 
 
 @router.delete("/{key_id}")
-def delete_user(key_id, db: Session = Depends(get_db), auth: HTTPBasicCredentials = Depends(BasicAuth)):
+def delete_key(key_id, db: Session = Depends(get_db), auth: HTTPBasicCredentials = Depends(BasicAuth)):
     # first authenticate
     req_user = User.get_user(db, auth)
     if not req_user:

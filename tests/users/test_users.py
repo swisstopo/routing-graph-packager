@@ -3,11 +3,13 @@ from base64 import b64encode
 from json import JSONDecodeError
 
 import pytest
+from sqlalchemy import delete
 from sqlmodel import Session, select
 from starlette.testclient import TestClient
 
 from routing_packager_app import SETTINGS
 from routing_packager_app.api_v1.models import User
+from routing_packager_app.db import engine
 from ..utils_ import create_new_user
 
 
@@ -195,3 +197,29 @@ def test_admin_user_created(get_client, get_session: Session, basic_auth_header:
     admin_user = get_session.exec(statement).first()
     assert admin_user is not None
     assert admin_user.email == expected_email
+
+
+def test_adding_an_existing_admin_leaves_no_open_transaction():
+    """
+    The admin is already there, so this only runs a lookup and writes nothing.
+
+    That lookup still opens a read transaction, and leaving it open holds a lock on the users
+    table for as long as the session lives, which any later DROP or ALTER then waits on.
+    """
+    with Session(engine) as session:
+        User.add_admin_user(session)
+
+        assert not session.in_transaction()
+
+
+def test_adding_a_missing_admin_commits_and_leaves_no_open_transaction(get_session: Session):
+    get_session.exec(delete(User).where(User.email == SETTINGS.ADMIN_EMAIL))
+    get_session.commit()
+
+    with Session(engine) as session:
+        User.add_admin_user(session)
+
+        assert not session.in_transaction()
+
+    with Session(engine) as session:
+        assert session.exec(select(User).where(User.email == SETTINGS.ADMIN_EMAIL)).first()

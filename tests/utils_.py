@@ -1,9 +1,14 @@
-from typing import List, Tuple  # noqa: F401
+import json
+from pathlib import Path
+from shutil import rmtree
+from typing import List, NamedTuple, Tuple  # noqa: F401
 
 from starlette.testclient import TestClient
 
 from httpx import Response
 from routing_packager_app import SETTINGS
+from routing_packager_app.constants import Providers
+from routing_packager_app.graph_build.builder import swap_graph_link
 from routing_packager_app.utils.file_utils import make_package_path
 
 DEFAULT_ARGS_POST = {
@@ -14,6 +19,72 @@ DEFAULT_ARGS_POST = {
 }
 
 
+class FakePool:
+    """Stands in for the ArqRedis pool the app puts on its state at startup."""
+
+    def __init__(self, health=None, queued=0, fails=False):
+        self.health = health
+        self.queued = queued
+        self.fails = fails
+
+    async def ping(self):
+        if self.fails:
+            raise ConnectionError("Redis is unreachable")
+        return True
+
+    async def get(self, _key):
+        return self.health
+
+    async def zcard(self, _key):
+        return self.queued
+
+
+GENERATION_NAME = "20260101T000000"
+WORKER_HEALTH = b"Aug-25 11:41:20 j_complete=41 j_failed=1 j_retried=0 j_ongoing=2 queued=3"
+
+# the provider the single-provider tests work against
+PROVIDER = Providers.OSM.value
+
+
+def reset_graph_state(provider=PROVIDER):
+    """Removes the graph symlink, every generation and the build status file."""
+    link = SETTINGS.get_graph_link(provider)
+    if link.is_symlink():
+        link.unlink()
+    rmtree(SETTINGS.get_generations_dir(provider), ignore_errors=True)
+    SETTINGS.get_build_status_path(provider).unlink(missing_ok=True)
+
+
+def make_generation(name=GENERATION_NAME, meta=None, provider=PROVIDER):
+    """Creates a generation and points the graph symlink at it, the way a finished build would."""
+    generation = SETTINGS.get_generations_dir(provider).joinpath(name)
+    generation.mkdir(parents=True)
+    if meta is not None:
+        generation.joinpath("build_meta.json").write_text(json.dumps(meta), encoding="utf8")
+    swap_graph_link(SETTINGS.get_graph_link(provider), generation)
+
+    return generation
+
+
+def write_build_status(provider=PROVIDER, **overrides):
+    """Writes a build status report, starting from an idle one."""
+    report = {
+        "state": "idle",
+        "stage": None,
+        "generation": None,
+        "started_at": None,
+        "updated_at": None,
+        "next_build_at": None,
+        "last_error": None,
+    }
+    report.update(overrides)
+    status_path = SETTINGS.get_build_status_path(provider)
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    status_path.write_text(json.dumps(report), encoding="utf8")
+
+    return report
+
+
 def create_new_user(client: TestClient, data: dict, auth_header, must_succeed=True) -> Response:
     """
     Helper function for valid new user creation.
@@ -22,9 +93,9 @@ def create_new_user(client: TestClient, data: dict, auth_header, must_succeed=Tr
 
     if must_succeed:
         res_json = response.json()
-        assert (
-            response.status_code == 200
-        ), f"status code was {response.status_code} with {response.json()}"
+        assert response.status_code == 200, (
+            f"status code was {response.status_code} with {response.json()}"
+        )
         assert response.headers["Content-Type"] == "application/json"
         assert set(res_json.keys()) >= {"id", "email"}
         return response
@@ -39,40 +110,61 @@ def create_new_job(client, data, auth_header, must_succeed=True) -> Response:
     response = client.post("/api/v1/jobs/", headers=auth_header, json=data)
 
     if must_succeed:
-        assert (
-            response.status_code == 200
-        ), f"status code was {response.status_code} with {response.content}"
+        assert response.status_code == 200, (
+            f"status code was {response.status_code} with {response.content}"
+        )
         assert response.headers["Content-Type"] == "application/json"
         return response
     return response
 
 
-def create_new_key(client, data, auth_header, must_succeed=True) -> Response: 
+def create_new_key(client, data, auth_header, must_succeed=True) -> Response:
     """
     Helper function for new api key creation.
     """
     response = client.post("/api/v1/keys/", headers=auth_header, json=data)
 
     if must_succeed:
-        assert (
-            response.status_code == 200
-        ), f"status code was {response.status_code} with {response.content}"
+        assert response.status_code == 200, (
+            f"status code was {response.status_code} with {response.content}"
+        )
         assert response.headers["Content-Type"] == "application/json"
         return response
     return response
 
 
-def create_package_params(j):
+class PackageParams(NamedTuple):
+    """
+    The positional arguments ``create_package`` takes, in its own argument order.
+
+    Unpacks with ``*params`` like the plain tuple it replaces, but callers that only want one
+    of them reach it by name, so inserting an argument here can no longer silently re-point
+    them at the value that used to sit at that index.
+    """
+
+    ctx: dict
+    job_id: int
+    job_name: str
+    job_provider: Providers
+    description: str
+    bbox: str
+    zip_path: Path
+    user_id: int
+
+
+def create_package_params(j) -> PackageParams:
     """
     Create the parameters for create_package task, with user ID 1.
 
     :param dict j: The job response in JSON
 
-    :returns: Tuple with all parameters inside
-    :rtype: tuple
+    :returns: All parameters, in create_package's argument order
+    :rtype: PackageParams
     """
     output_dir = SETTINGS.get_output_path()
 
     result_path = make_package_path(output_dir, j["name"], j["provider"])
 
-    return {}, j["id"], j["name"], j["description"], j["bbox"], result_path, 1
+    return PackageParams(
+        {}, j["id"], j["name"], j["provider"], j["description"], j["bbox"], result_path, 1
+    )

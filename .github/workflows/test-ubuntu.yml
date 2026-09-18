@@ -59,12 +59,6 @@ jobs:
           python -m venv .venv && source ./.venv/bin/activate
           $HOME/.local/bin/uv sync
 
-      - name: Install osmium & osmctools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y -qq osmium-tool osmctools
-          echo $(osmium --version)
-
       - name: linting
         run: |
           source .venv/bin/activate

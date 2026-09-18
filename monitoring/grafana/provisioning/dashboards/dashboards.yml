@@ -1,0 +1,10 @@
+apiVersion: 1
+
+providers:
+  - name: routing-packager
+    type: file
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false

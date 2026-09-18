@@ -1,6 +1,9 @@
 import zipfile
 from pathlib import Path
-from typing import Set
+from typing import List, Set
+
+from ..config import SETTINGS
+from ..constants import PROVIDERS
 
 
 def make_package_path(base_dir: Path, name: str, provider: str) -> Path:
@@ -33,3 +36,33 @@ def make_zip(source_paths: Set[Path], parent_path: Path, out_fp: str):
     with zipfile.ZipFile(out_fp, "w", zipfile.ZIP_DEFLATED) as archive:
         for p in source_paths:
             archive.write(p, "valhalla_tiles/" + str(p.relative_to(parent_path)))
+
+
+def resolve_graph(provider: str) -> Path | None:
+    """
+    Follows the graph symlink to the generation currently served to packaging jobs.
+
+    :param provider: the dataset provider whose graph to resolve.
+
+    :returns: the generation directory, or ``None`` while no build has finished yet or the link
+        points at something that is no longer there.
+    """
+    link = SETTINGS.get_graph_link(provider)
+    if not link.is_symlink():
+        return None
+
+    try:
+        return link.resolve(strict=True)
+    except OSError:
+        return None
+
+
+def get_deployed_providers() -> List[str]:
+    """
+    Reports which providers this deployment actually runs a graph build container for.
+
+    :returns: the deployed providers, in :class:`Providers` declaration order.
+    """
+    tmp_data_dir = SETTINGS.get_tmp_data_dir()
+
+    return [p for p in PROVIDERS if tmp_data_dir.joinpath(p).is_dir()]

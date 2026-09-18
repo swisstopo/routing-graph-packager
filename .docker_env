@@ -15,8 +15,6 @@ ADMIN_PASS=admin
 # EDIT: Shouldn't be needed in fact, at least for the web app,
 # since it checks if it's a docker env and sets it to /app/data
 # DATA_DIR=/home/nilsnolde/dev/gis-ops/routing-graph-packager/data
-VALHALLA_URL="http://app"
-
 POSTGRES_DB=gis
 POSTGRES_USER=admin
 POSTGRES_PASS=admin
@@ -27,6 +25,20 @@ POSTGRES_PASS=admin
 SSL_CERT='ssl/server.crt'
 SSL_KEY='ssl/server.key'
 
-# Valhalla image exclusive env vars
+# Graph build exclusive env vars
 # How many threads to build tiles? Should be two less than available threads
 CONCURRENCY=8
+MAX_CACHE_SIZE=1000000000
+
+# When to build a new graph, standard 5-field cron. Default is Sundays at 03:00.
+GRAPH_BUILD_CRON=0 3 * * 0
+# How long to wait for a running packaging job before giving up on a build, in seconds.
+GRAPH_PRUNE_TIMEOUT=3600
+# How long a lock on a graph directory stays valid, in seconds. Keep it shorter than the
+# interval between builds. Default is 4 days.
+GRAPH_LOCK_TTL=345600
+
+USE_ELEVATION=false
+# set this per container individually, 
+# PBF_LOCAL_PATH=
+PBF_URL=https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf

@@ -1,0 +1,159 @@
+"""
+Publishes what the graph builder is currently doing to a file on the shared volume.
+
+The builder runs in its own container, so the API app cannot ask it anything directly. Instead
+every stage transition is written to ``build_status.json`` next to the ``graph``
+symlink, where ``/api/v1/health`` reads it.
+"""
+
+import json
+import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+from ..config import SETTINGS
+from ..constants import BuildStage, BuildState
+from ..metrics import STATSD
+
+HEARTBEAT_INTERVAL = 10.0  # report the builder as active every n seconds
+EXTERNAL_SCHEDULE = "externally_controlled"
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class BuildStatus:
+    def __init__(self, path: Path | None = None, provider: str | None = None):
+        self.path = path
+        self.provider = provider
+        self._reset()
+
+    def _reset(self) -> None:
+        self._last_heartbeat = 0.0
+        self._stage_started: float | None = None
+        self._data = {
+            "state": BuildState.UNKNOWN.value,
+            "stage": None,
+            "generation": None,
+            "started_at": None,
+            "updated_at": None,
+            "next_build_at": None,
+            "last_error": None,
+        }
+
+    def bind(self, provider: str) -> None:
+        """
+        Points the status at one provider's build status file.
+
+        :param provider: the dataset provider this process builds for.
+        """
+        self.path = SETTINGS.get_build_status_path(provider)
+        self.provider = provider
+        self._reset()
+
+    def _close_stage(self) -> None:
+        """
+        Reports how long the stage that just ended took, if one was running.
+
+        Valhalla times its own tile build stages, so what this adds are the stages it knows nothing
+        about: pruning, and the PBF download and update.
+        """
+        if self._stage_started is None:
+            return
+
+        tags = [f"stage:{self._data['stage']}"]
+        if self.provider is not None:
+            tags.append(f"provider:{self.provider}")
+
+        STATSD.timing("build.stage.duration", (time.monotonic() - self._stage_started) * 1000, tags=tags)
+        self._stage_started = None
+
+    def stage(self, stage: BuildStage) -> None:
+        """
+        Records that the build moved on to ``stage``.
+
+        :param stage: the step the builder is about to start.
+        """
+        self._close_stage()
+        self._stage_started = time.monotonic()
+
+        if self._data["state"] != BuildState.BUILDING.value:
+            self._data["started_at"] = _now()
+            self._data["last_error"] = None
+            self._data["generation"] = None
+
+        self._data["state"] = BuildState.BUILDING.value
+        self._data["stage"] = stage.value
+        self._data["next_build_at"] = None
+        self._write()
+
+    def generation(self, generation: str) -> None:
+        """
+        Records which generation directory the running build writes into.
+
+        :param generation: the generation's directory name.
+        """
+        self._data["generation"] = generation
+        self._write()
+
+    def heartbeat(self) -> None:
+        """
+        Refreshes ``updated_at`` if the interval has passed.
+
+        Called for every line a build subprocess emits, so it has to stay cheap: the common case
+        is a single monotonic clock comparison.
+        """
+        now = time.monotonic()
+        if now - self._last_heartbeat < HEARTBEAT_INTERVAL:
+            return
+        self._write()
+
+    def idle(self, next_build_at: datetime | str | None = None) -> None:
+        """
+        Records that no build is running.
+
+        :param next_build_at: when the next build is due. A datetime where this process owns the
+            schedule, :data:`EXTERNAL_SCHEDULE` where something outside it does, and ``None`` where
+            it is simply unknown.
+        """
+        self._close_stage()
+
+        if isinstance(next_build_at, datetime):
+            next_build_at = next_build_at.isoformat()
+
+        self._data["state"] = BuildState.IDLE.value
+        self._data["stage"] = None
+        self._data["next_build_at"] = next_build_at
+        self._write()
+
+    def failed(self, error: str) -> None:
+        """
+        Records that the build gave up, keeping the stage it died on.
+
+        :param error: the message to surface to an operator.
+        """
+        self._close_stage()
+        self._data["state"] = BuildState.FAILED.value
+        self._data["last_error"] = error
+        self._write()
+
+    def _write(self) -> None:
+        if self.path is None:
+            raise RuntimeError("BuildStatus was never bound to a provider.")
+
+        self._last_heartbeat = time.monotonic()
+        self._data["updated_at"] = _now()
+
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            staged = self.path.with_name(self.path.name + ".tmp")
+            staged.write_text(json.dumps(self._data, indent=2), encoding="utf8")
+            os.replace(staged, self.path)
+        except OSError:
+            pass
+
+
+# bound by the build process at startup
+BUILD_STATUS = BuildStatus()

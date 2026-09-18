@@ -1,29 +1,30 @@
 import json
 import logging
 import os
+import time
+from contextlib import ExitStack
 from datetime import datetime, timezone
-from pathlib import Path
+from typing import List, Sequence
 
 from arq.connections import RedisSettings
 from fastapi import HTTPException
-import requests
-from requests.exceptions import ConnectionError
 import shutil
 from sqlmodel import Session, select
 from starlette.status import (
-    HTTP_200_OK,
     HTTP_404_NOT_FOUND,
     HTTP_500_INTERNAL_SERVER_ERROR,
-    HTTP_301_MOVED_PERMANENTLY,
 )
 
 from .api_v1.dependencies import split_bbox
 from .config import SETTINGS
-from .db import get_db
+from .db import create_tables, get_db
 from .api_v1.models import User, Job
-from .constants import Statuses
+from .constants import Providers, Statuses
 from .logger import AppSmtpHandler, get_smtp_details, LOGGER
+from .metrics import PACKAGE_DURATION, PACKAGES, start_metrics_server
 from .utils.file_utils import make_zip
+from .utils.lock_utils import lock_generation_shared
+from .utils.geom_utils import wkbe_to_geom, wkbe_to_str
 from .utils.valhalla_utils import get_tiles_with_bbox
 
 
@@ -31,12 +32,16 @@ async def create_package(
     ctx,
     job_id: int,
     job_name: str,
+    job_provider: Providers,
     description: str,
     bbox: str,
     zip_path: str,
     user_id: int | None,
     update: bool = False,
 ):
+    """
+    Packages the tiles intersecting a bounding box into a ZIP.
+    """
     session: Session = next(get_db())
 
     # Set up the logger where we have access to the user email
@@ -70,57 +75,43 @@ async def create_package(
     job.last_started = datetime.now(timezone.utc)
     session.commit()
 
+    started = time.perf_counter()
     succeeded = False
     try:
         # TODO: gzipping is synchronous, maybe follow
         #   https://arq-docs.helpmanual.io/#synchronous-jobs
 
-        # get the active Valhalla instance
-        current_valhalla_dir_str = ""
-        for port in (8002, 8003):
-            try:
-                status = requests.get(f"{SETTINGS.VALHALLA_URL}:{port}/status").status_code
-                LOGGER.info(f"checking {SETTINGS.VALHALLA_URL}:{port}/status", extra=log_extra)
-                # 301 is what the test "expects" due to the simple HTTP server
-                if status not in (HTTP_200_OK, HTTP_301_MOVED_PERMANENTLY):
-                    continue
-                current_valhalla_dir_str = SETTINGS.get_valhalla_path(port)
-                break
-            except ConnectionError:
-                pass
-
-        if not current_valhalla_dir_str:
+        graph_link = SETTINGS.get_graph_link(job_provider.lower())
+        # exit stack is used to wrap the contextmanager entry
+        # in a try/except
+        stack = ExitStack()
+        try:
+            current_valhalla_dir = stack.enter_context(lock_generation_shared(graph_link))
+        except OSError as e:
             raise HTTPException(
                 HTTP_500_INTERNAL_SERVER_ERROR,
-                "No Valhalla service online, check the Valhalla server's docker logs.",
+                f"No graph available behind {graph_link}, check the graph build container's logs ({e}).",
             )
 
-        current_valhalla_dir = Path(current_valhalla_dir_str).resolve()
-        valhalla_tiles = sorted(current_valhalla_dir.rglob("*.gph"))
-        if not valhalla_tiles or not current_valhalla_dir_str:
-            raise HTTPException(404, f"No Valhalla tiles in {current_valhalla_dir.resolve()}")
+        # no exception, so we can enter the context
+        with stack:
+            LOGGER.info(f"Packaging from graph generation {current_valhalla_dir.name}", extra=log_extra)
+            valhalla_tiles = sorted(current_valhalla_dir.rglob("*.gph"))
+            if not valhalla_tiles:
+                raise HTTPException(HTTP_404_NOT_FOUND, f"No Valhalla tiles in {current_valhalla_dir}")
 
-        # Gather Valhalla tile paths
-        tile_paths = get_tiles_with_bbox(valhalla_tiles, split_bbox(bbox), current_valhalla_dir)
-        if not tile_paths:
-            raise HTTPException(404, f"No Valhalla tiles in bbox {bbox}")
+            tile_paths = get_tiles_with_bbox(valhalla_tiles, split_bbox(bbox), current_valhalla_dir)
+            if not tile_paths:
+                raise HTTPException(HTTP_404_NOT_FOUND, f"No Valhalla tiles in bbox {bbox}")
 
-        # zip up the tiles after locking the directory to not be updated right now
-        out_dir = SETTINGS.get_output_path()
-        lock = out_dir.joinpath(".lock")
-        lock.touch(exist_ok=False)
-        try:
             make_zip(tile_paths, current_valhalla_dir, zip_path)
-        except Exception as e:
-            LOGGER.error(e)
-        finally:
-            lock.unlink(missing_ok=False)
 
         # Create the meta JSON
         fname = os.path.basename(zip_path)
         j = {
             "job_id": job_id,
             "filepath": fname,
+            "provider": job_provider.lower(),
             "name": job_name,
             "description": description,
             "extent": bbox,
@@ -131,14 +122,17 @@ async def create_package(
         with open(os.path.join(dirname, fname_sanitized + ".json"), "w", encoding="utf8") as f:
             json.dump(j, f, indent=2, ensure_ascii=False)
 
+        action = "Updated" if update else "Created"
         LOGGER.info(
-            f"Job {job_id} by {user_email} finished successfully. Find the new dataset in {zip_path}",
+            f"Job {job_id} by {user_email} finished successfully. {action} the dataset in {zip_path}",
             extra=log_extra,
         )
         succeeded = True
     # catch all exceptions we're controlling
     except HTTPException as e:
-        LOGGER.critical(f"Job {job.name} failed with\n'{e.detail}'", extra=log_extra)
+        action = "Updating" if update else "Creating"
+        kept = " The previous package was kept." if update else ""
+        LOGGER.critical(f"{action} job {job.name} failed with\n'{e.detail}'{kept}", extra=log_extra)
         raise e
     # any other exception is assumed to be a deleted job and will only be logged/email sent
     except Exception:  # pragma: no cover
@@ -148,13 +142,108 @@ async def create_package(
     finally:
         final_status = Statuses.COMPLETED
         if not succeeded:
-            shutil.rmtree(os.path.dirname(zip_path))
             final_status = Statuses.FAILED
+
+            # only remove zip if this job tried to create it,
+            # otherwise leave it around
+            if not update:
+                shutil.rmtree(os.path.dirname(zip_path), ignore_errors=True)
 
         # always write the "last_finished" column
         job.last_finished = datetime.now(timezone.utc)
         job.status = final_status
         session.commit()
+
+        updated = str(update).lower()
+        provider = job_provider.lower()
+        PACKAGE_DURATION.labels(update=updated, provider=provider).observe(time.perf_counter() - started)
+        PACKAGES.labels(
+            outcome="succeeded" if succeeded else "failed", update=updated, provider=provider
+        ).inc()
+
+        session.close()
+
+
+def _sort_jobs(jobs_: Sequence[Job]) -> List[Job]:
+    """
+    Sorts jobs by bbox area, largest first.
+
+    :param jobs_: the jobs to sort.
+
+    :returns: the sorted jobs.
+
+    This helps to fairly balance jobs across multiple worker threads.
+    """
+    return [
+        job
+        for _, job in sorted(
+            ((wkbe_to_geom(job.bbox).area, job) for job in jobs_),
+            key=lambda x: x[0],
+            reverse=True,
+        )
+    ]
+
+
+async def update_all_packages(ctx, provider: str):
+    """
+    Recreates one provider's packages from its current graph generation.
+
+    :param provider: the dataset provider whose graph was just rebuilt.
+    """
+    session: Session = next(get_db())
+    try:
+        admin = session.exec(select(User).where(User.email == SETTINGS.ADMIN_EMAIL)).first()
+        user_email = admin.email if admin is not None else ""
+        if not LOGGER.handlers and user_email:
+            handler = AppSmtpHandler(**get_smtp_details([user_email]))
+            handler.setLevel(logging.INFO)
+            LOGGER.addHandler(handler)
+
+        jobs = _sort_jobs(
+            session.exec(
+                select(Job).where(Job.update == True, Job.provider == Providers(provider))  # noqa: E712
+            ).all()
+        )
+        LOGGER.info(f"Updating {len(jobs)} {provider} packages as {user_email}.")
+
+        start_time = time.time()
+        succeeded = 0
+        for job in jobs:
+            try:
+                await create_package(
+                    ctx,
+                    job.id,
+                    job.arq_id,
+                    job.provider,
+                    job.description,
+                    wkbe_to_str(job.bbox),
+                    job.zip_path,
+                    job.user_id,
+                    True,
+                )
+                succeeded += 1
+            except Exception as e:
+                LOGGER.critical(
+                    f"Updating job {job.name} failed with '{e}'",
+                    extra={"user": user_email, "job_id": job.id},
+                )
+
+        total_time = (time.time() - start_time) / 60
+        if succeeded == len(jobs):
+            LOGGER.info(f"Updated {succeeded} {provider} packages in {total_time:.1f} minutes.")
+        else:
+            LOGGER.warning(
+                f"Updated {succeeded} of {len(jobs)} {provider} packages in {total_time:.1f} minutes."
+            )
+
+        return {"total": len(jobs), "succeeded": succeeded}
+    finally:
+        session.close()
+
+
+async def startup(ctx):
+    create_tables()
+    start_metrics_server()
 
 
 class WorkerSettings:
@@ -163,4 +252,7 @@ class WorkerSettings:
     """
 
     redis_settings = RedisSettings.from_dsn(SETTINGS.REDIS_URL)
-    functions = [create_package]
+    on_startup = startup
+    functions = [create_package, update_all_packages]
+    job_timeout = 60 * 60 * 24  # 24 hours
+    health_check_interval = 60

@@ -1,11 +1,15 @@
 volumes:
   postgis-data:
+  prometheus-data:
+  grafana-data:
   packages: # do not change any detail of this volume
     driver: local
     driver_opts:
       type: none
       device: $DATA_DIR # DATA_DIR is the host directory for the data. It has to be in the environment, e.g. in .env file
       o: bind
+  # graph data lives on a separate volume from 
+  # the final packages
   tmp_data: # do not change any detail of this volume
     driver: local
     driver_opts:
@@ -26,6 +30,10 @@ services:
     environment:
       - ALLOW_IP_RANGE=0.0.0.0/0
       - POSTGRES_MULTIPLE_EXTENSIONS=postgis
+      - SSL_MODE=off
+      - SSL_CERT=
+      - SSL_KEY=
+      - SSL_CERT_FILE=
     # mostly needed to define the database hosts
     env_file:
       - .docker_env
@@ -67,6 +75,25 @@ services:
     healthcheck:
       disable: true
     restart: always
+  graph-build-osm:
+    image: ghcr.io/swisstopo/routing-graph-packager/routing-graph-packager:latest
+    container_name: routing-packager-graph-build-osm
+    command: graph-build --provider osm
+    env_file:
+      - .docker_env
+      - .env
+    environment:
+      PBF_URL: https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
+    networks:
+      - routing-packager
+    volumes:
+      - tmp_data:/app/tmp_data
+    depends_on:
+      - postgis
+      - redis
+    healthcheck:
+      disable: true
+    restart: always
   app:
     image: ghcr.io/swisstopo/routing-graph-packager/routing-graph-packager:latest
     container_name: routing-packager-app
@@ -99,4 +126,62 @@ services:
       - 1080:1080
     networks:
       - routing-packager
+    restart: always
+  statsd-exporter:
+    # Config baked into the image instead of a $PWD bind mount, so it works on a
+    # rootless host where the daemon cannot see the runner's checkout filesystem.
+    build:
+      context: .
+      dockerfile: monitoring/statsd.Dockerfile
+    image: routing-packager-statsd-exporter:local
+    container_name: routing-packager-statsd-exporter
+    profiles: [monitoring]
+    command:
+      - --statsd.mapping-config=/etc/statsd/mapping.yml
+      - --statsd.listen-udp=:8125
+      - --statsd.parse-dogstatsd-tags
+      - --web.listen-address=:9102
+    networks:
+      - routing-packager
+    restart: always
+  prometheus:
+    # Config baked into the image instead of a $PWD bind mount.
+    build:
+      context: .
+      dockerfile: monitoring/prometheus.Dockerfile
+    image: routing-packager-prometheus:local
+    container_name: routing-packager-prometheus
+    profiles: [monitoring]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=90d
+    volumes:
+      - prometheus-data:/prometheus
+    networks:
+      - routing-packager
+    depends_on:
+      - statsd-exporter
+    restart: always
+  grafana:
+    # Provisioning and dashboards baked into the image instead of $PWD bind
+    # mounts. Dashboards live in /etc/grafana/dashboards (NOT under the
+    # grafana-data volume, which would mask them and never pick up rebuilds).
+    build:
+      context: .
+      dockerfile: monitoring/grafana.Dockerfile
+    image: routing-packager-grafana:local
+    container_name: routing-packager-grafana
+    profiles: [monitoring]
+    ports:
+      - 3000:3000
+    env_file:
+      - .docker_env
+      - .env
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - routing-packager
+    depends_on:
+      - prometheus
     restart: always

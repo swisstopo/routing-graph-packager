@@ -1,8 +1,6 @@
-name: Deploy -> local
+name: Deploy -> localhost
+  
 on:
-  push:
-    branches:
-      - main  # or your deployment branch
   workflow_dispatch:
 
 jobs:
@@ -11,12 +9,12 @@ jobs:
     environment: localhost
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Docker
         run: |
           docker --version
-          docker-compose --version
+          docker compose version
 
       - name: Generate .docker_env file
         run: |
@@ -26,7 +24,6 @@ jobs:
           REDIS_URL=${{ vars.REDIS_URL }}
           ADMIN_EMAIL=${{ vars.ADMIN_EMAIL }}
           ADMIN_PASS=${{ secrets.ADMIN_PASS }}
-          VALHALLA_URL=${{ vars.VALHALLA_URL }}
           POSTGRES_DB=${{ vars.POSTGRES_DB }}
           POSTGRES_USER=${{ vars.POSTGRES_USER }}
           POSTGRES_PASS=${{ secrets.POSTGRES_PASS }}
@@ -37,9 +34,18 @@ jobs:
           USE_ELEVATION=${{ vars.USE_ELEVATION }}
           PBF_LOCAL_PATH=${{ vars.PBF_LOCAL_PATH }}
           PBF_URL=${{ vars.PBF_URL }}
+          GRAPH_BUILD_CRON=${{ vars.GRAPH_BUILD_CRON || '0 3 * * 0' }}
+          GRAPH_PRUNE_TIMEOUT=${{ vars.GRAPH_PRUNE_TIMEOUT || '3600' }}
+          GRAPH_LOCK_TTL=${{ vars.GRAPH_LOCK_TTL || '345600' }}
+          STATSD_HOST=statsd-exporter
+          GF_SECURITY_ADMIN_USER=${{ vars.GRAFANA_ADMIN_USER || 'admin' }}
+          GF_SECURITY_ADMIN_PASSWORD=${{ secrets.GRAFANA_ADMIN_PASS }}
           HTTP_PROXY=${{ vars.HTTP_PROXY }}
           HTTPS_PROXY=${{ vars.HTTPS_PROXY }}
           NO_PROXY=${{ vars.NO_PROXY }}
+          REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+          SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+          CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
           EOF
 
           cat > .env <<EOF
@@ -47,13 +53,18 @@ jobs:
           TMP_DATA_DIR=${{ vars.TMP_DATA_DIR }}
           COMPOSE_PROJECT_NAME=${{ vars.COMPOSE_PROJECT_NAME }}
           SSL_CERT_DIR=${{ vars.SSL_CERT_DIR }}
+          DOCKER_HOST=unix:///var/run/docker.sock
           EOF
 
       - name: Pull latest images
         run: |
-          docker-compose pull
+          docker compose --profile monitoring pull postgis redis worker graph-build-osm app fake-smtp-server
+          docker compose --profile monitoring build grafana statsd-exporter prometheus
 
       - name: Deploy app
         run: |
-          docker-compose down --remove-orphans
-          docker-compose up -d
+          docker compose --profile monitoring down --remove-orphans
+          docker compose --profile monitoring up -d --build --remove-orphans && break
+      - name: Cleanup old images
+        run: |
+          docker image prune -af --filter "until=168h"
