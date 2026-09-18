@@ -60,7 +60,7 @@ def post_key(
     if not User.get_user(db, auth):
         raise HTTPException(HTTP_401_UNAUTHORIZED, "Wrong username or password.")
 
-    generated_key = secrets.token_urlsafe(16)
+    generated_key = key.key or secrets.token_urlsafe(16)
     hashed_key = hmac_hash(generated_key)
     key_db = APIKeys.model_validate(
         key,
