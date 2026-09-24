@@ -40,9 +40,9 @@ jobs:
           STATSD_HOST=statsd-exporter
           GF_SECURITY_ADMIN_USER=${{ vars.GRAFANA_ADMIN_USER || 'admin' }}
           GF_SECURITY_ADMIN_PASSWORD=${{ secrets.GRAFANA_ADMIN_PASS }}
-          HTTP_PROXY=${{ vars.HTTP_PROXY }}
-          HTTPS_PROXY=${{ vars.HTTPS_PROXY }}
-          NO_PROXY=${{ vars.NO_PROXY }}
+          http_proxy=${{ vars.HTTP_PROXY }}
+          https_proxy=${{ vars.HTTPS_PROXY }}
+          no_proxy=${{ vars.NO_PROXY }}
           REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
           SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
           CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
