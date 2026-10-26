@@ -7,7 +7,7 @@ from sqlmodel import create_engine, Session, SQLModel
 
 from .config import SETTINGS as S
 
-SQLALCHEMY_DATABASE_URI: str = f"postgresql://{S.POSTGRES_USER}:{S.POSTGRES_PASS}@{S.POSTGRES_HOST}:{S.POSTGRES_PORT}/{S.POSTGRES_DB}"
+SQLALCHEMY_DATABASE_URI = (f"postgresql+psycopg2://{S.POSTGRES_USER}:{S.POSTGRES_PASS}@{S.POSTGRES_HOST}:{S.POSTGRES_PORT}/{S.POSTGRES_DB}")
 
 engine = create_engine(SQLALCHEMY_DATABASE_URI, echo=bool(os.getenv("DEBUG")), future=True)
 

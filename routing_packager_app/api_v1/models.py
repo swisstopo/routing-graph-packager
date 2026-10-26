@@ -79,7 +79,7 @@ class APIKeys(APIKeysBase, table=True):
                     APIKeys.is_active,
                     APIKeys.key == hashed_key,
                     permission_clause,
-                    APIKeys.valid_until > datetime.now(),
+                    APIKeys.valid_until > datetime.now(timezone.utc),
                 )
             )
         ).first()
