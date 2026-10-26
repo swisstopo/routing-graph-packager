@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import secrets
 from typing import List
 
@@ -43,7 +43,7 @@ def get_keys(
     if comment is not None:
         keys = keys.where(APIKeys.comment.startswith(comment))
     if is_valid is not None:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         if is_valid:
             keys = keys.where(APIKeys.valid_until > now)
         else:
@@ -67,7 +67,7 @@ def post_key(
         update={
             "key": hashed_key,
             "is_active": True,
-            "valid_until": datetime.now() + timedelta(days=key.validity_days),
+            "valid_until": datetime.now(timezone.utc) + timedelta(days=key.validity_days),
         },
     )
 
@@ -119,7 +119,7 @@ def patch_key(
     key_data = key_update.model_dump(exclude_unset=True)
     for k, val in key_data.items():
         if k == "validity_days":
-            key.valid_until = datetime.now() + timedelta(days=val)
+            key.valid_until = datetime.now(timezone.utc) + timedelta(days=val)
         else:
             setattr(key, k, val)
 
