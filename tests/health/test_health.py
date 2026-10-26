@@ -13,17 +13,17 @@ from tests.utils_ import PROVIDER, make_generation, reset_graph_state
 from .conftest import GENERATION_NAME, GRAPH_META, FakePool
 
 
-def test_fail_without_credentials(get_client: TestClient):
+def test_health_is_public(get_client: TestClient):
     res = get_client.get("/api/v1/health")
 
-    assert res.status_code == 401
+    assert res.status_code == 200
 
 
-def test_fail_with_a_read_key(get_client: TestClient, create_key_header):
+def test_health_accepts_read_key(get_client: TestClient, create_key_header):
     key = create_key_header(APIPermission.READ, 1)
     res = get_client.get("/api/v1/health", headers={"x-api-key": key["key"]})
 
-    assert res.status_code == 401
+    assert res.status_code == 200
 
 
 def test_success_with_an_internal_key(get_client: TestClient, create_key_header):
@@ -152,13 +152,13 @@ def test_answers_with_the_admin_credentials_while_postgres_is_down(
     assert res.json()["status"] == "degraded"
 
 
-def test_admin_credentials_must_match(get_client: TestClient):
+def test_health_ignores_invalid_credentials(get_client: TestClient):
     from base64 import b64encode
 
     wrong = b64encode(f"{SETTINGS.ADMIN_EMAIL}:not-the-password".encode()).decode()
     res = get_client.get("/api/v1/health", headers={"Authorization": f"Basic {wrong}"})
 
-    assert res.status_code == 401
+    assert res.status_code == 200
 
 
 @pytest.fixture
