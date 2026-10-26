@@ -31,7 +31,8 @@ def test_post_key(
     assert key_db.is_active
 
     tolerance = timedelta(seconds=10)
-    assert abs(key_db.valid_until - (datetime.now(timezone.utc) + timedelta(days=validity_days))) <= tolerance
+    assert abs(key_db.valid_until - (datetime.now(timezone.utc) 
+                                     + timedelta(days=validity_days))) <= tolerance
 
     assert key_db.permission == permission
     assert len(key_db.key) == 64
@@ -111,7 +112,8 @@ def test_patch_key(get_client, basic_auth_header, get_session: Session):
     response_key = APIKeysRead.model_validate(res.json())
     assert response_key.permission == "write"
     tolerance = timedelta(seconds=10)
-    assert abs(response_key.valid_until - (datetime.now(timezone.utc) + timedelta(days=1))) <= tolerance
+    assert abs(response_key.valid_until - (datetime.now(timezone.utc) 
+                                           + timedelta(days=1))) <= tolerance
     assert response_key.comment == ""
 
     # update it
@@ -125,7 +127,8 @@ def test_patch_key(get_client, basic_auth_header, get_session: Session):
     assert new_response_key.id == response_key.id
     assert new_response_key.permission == "write"
     tolerance = timedelta(seconds=20)
-    assert abs(new_response_key.valid_until - (datetime.now(timezone.utc)+ timedelta(days=1))) <= tolerance
+    assert abs(new_response_key.valid_until - (datetime.now(timezone.utc) 
+                                               + timedelta(days=1))) <= tolerance
     assert new_response_key.comment == "test"
 
     # then a new permission and a different validity time frame
@@ -136,7 +139,8 @@ def test_patch_key(get_client, basic_auth_header, get_session: Session):
     assert new_response_key.id == response_key.id
     assert new_response_key.permission == "read"
     tolerance = timedelta(seconds=20)
-    assert abs(new_response_key.valid_until - (datetime.now(timezone.utc)+ timedelta(days=15))) <= tolerance
+    assert abs(new_response_key.valid_until - (datetime.now(timezone.utc)
+                                               + timedelta(days=15))) <= tolerance
     assert new_response_key.comment == "test"
     assert new_response_key.is_active
 
