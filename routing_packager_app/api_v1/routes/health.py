@@ -4,12 +4,11 @@ from typing import Any, Dict
 
 from arq.connections import ArqRedis
 from arq.constants import default_queue_name
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBasicCredentials
 from sqlalchemy import text
 from sqlmodel import Session
-from starlette.status import HTTP_401_UNAUTHORIZED
 
 from ..auth import BasicAuth, HeaderKey
 from ...config import SETTINGS
